@@ -1321,29 +1321,21 @@ local function castBody(macro)
     -- first, in the order the player ticked them (see sideEntries): the stopCast option stops the current
     -- cast (but, with spam on, not this spell's own channel), the startAttack option starts auto-attack,
     -- the petAttack option sends the pet at the current target, racials are cast and useItems slots used.
-    -- With racials, items or /startattack first, #showtooltip names the spell so the button doesn't show the
-    -- item. It names the spell with spam on too, unless modifier or form clauses pick the icon: while
-    -- stealthed (or channelling, or in the form) no clause matches, and a bare #showtooltip would show a question mark
+    -- #showtooltip never names the spell, so with racials, items or /startattack first the button shows those,
+    -- and with spam on it shows a question mark while stealthed (or channelling, or in the form): no clause matches
     local spam = smb.isOptionOn(macro, "spam") and macro.spam or nil
     local rank = smb.rank(macro)
     -- a toggle spell's spam option renames the cast (see smb.castName) rather than adding a condition
     local name = smb.castName(macro)
-    local noToggle = spam == NO_TOGGLE
-    if noToggle then spam = nil end
+    if spam == NO_TOGGLE then spam = nil end
     -- the modifier spells' clauses go first, so a held key wins over the form spells, and those over the
     -- macro's own
     local mods = modifierClauses(macro) .. formClauses(macro)
-    local namesSpell = noToggle or (spam ~= nil and mods == "")
     local before = {}
     for _, entry in ipairs(sideEntries(macro, "before", spam)) do
         before[#before + 1] = entry[2] .. "\n"
-        -- /stopcasting, /stopattack, /petattack, /cancelaura, /cleartarget and /targetenemy don't change the button's icon
-        if entry[1] ~= "stopCast" and entry[1] ~= "stopAttack" and entry[1] ~= "petAttack"
-            and entry[1] ~= "cancelIceBlock" and entry[1] ~= "clearDead" and entry[1] ~= "targetEnemy" then
-            namesSpell = true
-        end
     end
-    local header = "#showtooltip" .. (namesSpell and " " .. macro.name or "") .. "\n" .. table.concat(before)
+    local header = "#showtooltip\n" .. table.concat(before)
     -- with a sequence, every step is cast like the macro's own spell
     local steps = sequenceSteps(macro)
     if steps then steps[1] = name end
