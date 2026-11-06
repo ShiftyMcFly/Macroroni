@@ -65,7 +65,9 @@ local EQUIPMENT_OPTIONS = { equipStopAttack = true, equipStopCast = true }
 -- altCastOn) sets where that key's spell is cast: "mouseover", "focus", "cursor" or "self", or the target when unset (see
 -- smb.modifierCastOn). "sequence" holds a
 -- list of spell names per spell: the macro /castsequences its own spell, then those, in that order. "followUp"
--- holds a cooldown spell's one spell name: the macro casts it on the same press, after its own. "forms"
+-- holds a cooldown spell's one spell name: the macro casts it on the same press, after its own. "iconSpell"
+-- holds one spell name: #showtooltip names it, fixing the button's icon (see smb.iconSpell). "customIcon" holds
+-- an icon instead, a file ID or texture name, set as the WoW macro's own (see smb.customIcon). "forms"
 -- holds a table per spell name, {[form name] = spell name}: the macro casts that spell while in that form of
 -- the class config's forms (see smb.formSpell). An enemy player copy stores its
 -- own settings under its spell's name plus the copy's suffix, e.g. "Dispel Magic @E" (see settingKey), and a
@@ -971,6 +973,49 @@ function smb.hasSequenceOn(macro)
     return sequenceSteps(macro) ~= nil
 end
 
+-- The learned spells a macro casts, its own first, then its form, modifier, sequence, follow-up and racial or
+-- offGcd spells, each once: the spells its #showtooltip can name.
+function smb.iconSpells(macro)
+    local spells, seen = {}, {}
+    local function add(name)
+        local other = smb.macroByName[name or ""]
+        if name and not seen[name] and not (other and other.unlearned) then
+            seen[name] = true
+            spells[#spells + 1] = name
+        end
+    end
+    add(macro.name)
+    if smb.isOptionOn(macro, "pet") then add(macro.petAbility) end
+    for _, form in ipairs(smb.formNames()) do add(smb.formSpell(macro, form)) end
+    for _, mod in ipairs(smb.MODIFIERS) do add(smb.modifierSpell(macro, mod)) end
+    for _, name in ipairs(sequenceSteps(macro) or NO_SLOTS) do add(name) end
+    local followUp = followUpMacro(macro)
+    if followUp then add(followUp.name) end
+    for _, side in ipairs({"before", "after"}) do
+        for _, name in ipairs(racialsOn(macro, side)) do add(name) end
+    end
+    return spells
+end
+
+-- The spell picked for a macro's icon, or nil for Automatic. It may no longer be in the macro: its setting is
+-- kept, but smb.iconSpell ignores it.
+function smb.pickedIconSpell(macro)
+    if not smb.offersUseItems(macro) then return nil end
+    return settings("iconSpell")[settingKey(macro)]
+end
+
+-- The icon picked for a macro in place of its spells' (see smb.showIconPicker), or nil.
+function smb.customIcon(macro)
+    if not smb.offersUseItems(macro) then return nil end
+    return settings("customIcon")[settingKey(macro)]
+end
+
+-- The spell a macro's #showtooltip names, or nil for a bare #showtooltip.
+function smb.iconSpell(macro)
+    local picked = smb.pickedIconSpell(macro)
+    if picked and tContains(smb.iconSpells(macro), picked) then return picked end
+end
+
 -- Whether a macro has an options menu: every spell macro does, for stopCast, startAttack, autoShot or petFollow, and every
 -- equipment macro, for equipStopAttack and equipStopCast.
 function smb.hasOptions(macro)
@@ -1321,8 +1366,9 @@ local function castBody(macro)
     -- first, in the order the player ticked them (see sideEntries): the stopCast option stops the current
     -- cast (but, with spam on, not this spell's own channel), the startAttack option starts auto-attack,
     -- the petAttack option sends the pet at the current target, racials are cast and useItems slots used.
-    -- #showtooltip never names the spell, so with racials, items or /startattack first the button shows those,
-    -- and with spam on it shows a question mark while stealthed (or channelling, or in the form): no clause matches
+    -- #showtooltip names only the spell picked for the icon (see smb.iconSpell). Otherwise, with racials, items or
+    -- /startattack first the button shows those, and with spam on it shows a question mark while stealthed (or
+    -- channelling, or in the form): no clause matches
     local spam = smb.isOptionOn(macro, "spam") and macro.spam or nil
     local rank = smb.rank(macro)
     -- a toggle spell's spam option renames the cast (see smb.castName) rather than adding a condition
@@ -1335,7 +1381,8 @@ local function castBody(macro)
     for _, entry in ipairs(sideEntries(macro, "before", spam)) do
         before[#before + 1] = entry[2] .. "\n"
     end
-    local header = "#showtooltip\n" .. table.concat(before)
+    local iconSpell = smb.iconSpell(macro)
+    local header = "#showtooltip" .. (iconSpell and " " .. iconSpell or "") .. "\n" .. table.concat(before)
     -- with a sequence, every step is cast like the macro's own spell
     local steps = sequenceSteps(macro)
     if steps then steps[1] = name end
@@ -1423,6 +1470,7 @@ end
 -- Sets a page macro's body, and tooLong when it is over WoW's limit: such a macro is never created or
 -- rewritten (see smb.pickupMacro and syncMacro).
 local function setBody(macro)
+    macro.macroIcon = smb.customIcon(macro) or ICON_QUESTION_MARK
     macro.body = macroBody(macro)
     macro.tooLong = #macro.body > MAX_MACRO_BODY
 end
@@ -2106,10 +2154,23 @@ local function setDefaulted(macro, key, on)
     end
 end
 
-local function rewrite(macro)
+-- iconChanged also sets the WoW macro's icon. Only then: GetMacroInfo gives a question mark macro's spell icon,
+-- so syncMacro can't compare icons.
+local function rewrite(macro, iconChanged)
     setBody(macro)
     if InCombatLockdown() then return end
-    syncMacro(macro, GetMacroIndexByName(macro.macroName))
+    local index = GetMacroIndexByName(macro.macroName)
+    syncMacro(macro, index)
+    if iconChanged and index ~= 0 then
+        EditMacro(index, nil, macro.macroIcon, not macro.tooLong and macro.body or nil)
+    end
+end
+
+-- Says so and returns true in combat, when a macro's icon can't be set.
+local function blockedInCombat()
+    if not InCombatLockdown() then return false end
+    UIErrorsFrame:AddMessage(ERR_NOT_IN_COMBAT, 1, 0.1, 0.1)
+    return true
 end
 
 -- Notes that turning COPY_OPTIONS key off on macro (a spell's macro or one of its copies) removes that copy
@@ -2245,6 +2306,24 @@ function smb.setFollowUpSpell(macro, name)
     rewrite(macro)
 end
 
+-- Sets the spell a macro's #showtooltip names, or clears it with nil for Automatic, replacing any custom icon,
+-- then rewrites the macro like smb.toggleOption.
+function smb.setIconSpell(macro, name)
+    local hadCustom = smb.customIcon(macro) ~= nil
+    if hadCustom and blockedInCombat() then return end
+    settings("iconSpell")[settingKey(macro)] = name
+    settings("customIcon")[settingKey(macro)] = nil
+    rewrite(macro, hadCustom)
+end
+
+-- Sets the icon of a macro, replacing any spell picked for it, then rewrites the macro like smb.toggleOption.
+function smb.setCustomIcon(macro, icon)
+    if blockedInCombat() then return end
+    settings("customIcon")[settingKey(macro)] = icon
+    settings("iconSpell")[settingKey(macro)] = nil
+    rewrite(macro, true)
+end
+
 -- Sets the rank a macro casts (nil for Normal, "raid" or "combat"), then rewrites the macro like smb.toggleOption.
 -- It is stored without checking the sequence (see smb.rank): the menu greys the downranks out while one is on.
 function smb.setRank(macro, rank)
@@ -2264,7 +2343,7 @@ local SPELL_SETTINGS = {
     "petAttack", "stopCast", "startAttack", "startAttackBefore", "petAttackAfter", "autoShotBefore",
     "autoShotAfter", "petFollowBefore", "petFollowAfter",
     "stopAttackBefore", "stopAttackAfter", "cancelIceBlockBefore", "clearDeadBefore", "targetEnemyBefore", "useItems", "useItemsAfter", "racials", "racialsAfter", "order", "orderAfter", "modifiers", "forms",
-    "sequence", "followUp",
+    "sequence", "followUp", "iconSpell", "customIcon",
 }
 local EQUIPMENT_SETTINGS = {"equipStopAttack", "equipStopCast"}
 
@@ -2303,6 +2382,8 @@ end
 -- with its own settings, so the page must be rebuilt after.
 function smb.resetMacro(macro)
     if not smb.offersReset(macro) then return end
+    local hadCustom = smb.customIcon(macro) ~= nil
+    if hadCustom and blockedInCombat() then return end
     local noCopies = macro.equipment or isCopy(macro) or macro.variant -- has no copies of its own to remove
     if not noCopies then
         for key in pairs(COPY_OPTIONS) do
@@ -2316,7 +2397,7 @@ function smb.resetMacro(macro)
         end
     end
     for _, pair in ipairs(stored) do settings(pair[1])[pair[2]] = nil end
-    rewrite(macro)
+    rewrite(macro, hadCustom)
 end
 
 -- Every action slot holding each WoW macro, as {[macro name] = {slot, ...}} in slot order, and whether any
@@ -2529,7 +2610,7 @@ local function mergeAlike(macro, isFork)
     local alike = {macro}
     for _, other in ipairs(smb.macros) do
         if other ~= macro and not other.custom and not other.equipment and baseKey(other) == base
-            and other.body == macro.body then
+            and other.body == macro.body and other.macroIcon == macro.macroIcon then
             alike[#alike + 1] = other
         end
     end

@@ -212,6 +212,38 @@ function smb.showMacroMenu(owner, macro, onChange, actionSlot, plainSpell)
             -- a pick no longer learned or moved out of its section stays listed, so it can be changed back
             if picked and not listed then addPick(picked .. " (unavailable)", picked) end
         end
+        -- the Icon submenu: Automatic (a bare #showtooltip), the spell it names, from the spells the macro casts,
+        -- or a custom icon from the game's list
+        local function addIconMenu()
+            if not smb.offersUseItems(macro) then return end
+            local picked = smb.pickedIconSpell(macro)
+            local submenu = rootDescription:CreateButton("Icon: "
+                .. (smb.customIcon(macro) and "Custom" or picked or "Automatic"))
+            submenu:CreateTitle("Show On The Button")
+            local function addPick(label, name)
+                submenu:CreateRadio(label,
+                    function() return smb.pickedIconSpell(macro) == name and not smb.customIcon(macro) end,
+                    function()
+                        if not change(function(m) smb.setIconSpell(m, name) end) then return end
+                        onChange() -- rewrites the macro and its subtext
+                    end)
+            end
+            addPick("Automatic", nil)
+            local spells = smb.iconSpells(macro)
+            for _, name in ipairs(spells) do addPick(name, name) end
+            -- a pick the macro no longer casts stays listed, so the player sees why it does nothing
+            if picked and not tContains(spells, picked) then addPick(picked .. " (not in macro)", picked) end
+            submenu:CreateDivider()
+            submenu:CreateRadio("Custom Icon...",
+                function() return smb.customIcon(macro) ~= nil end,
+                function()
+                    smb.showIconPicker(smb.customIcon(macro), function(icon)
+                        if not change(function(m) smb.setCustomIcon(m, icon) end) then return end
+                        onChange() -- rewrites the macro and its page icon
+                    end)
+                    return MenuResponse.Close
+                end)
+        end
         if macro.equipment then
             rootDescription:CreateTitle("Before Using")
             addOption("Stop Attacking", "equipStopAttack")
@@ -367,6 +399,7 @@ function smb.showMacroMenu(owner, macro, onChange, actionSlot, plainSpell)
         addSide("after")
         addSequenceMenu()
         addFollowUpMenu()
+        addIconMenu()
         if not smb.offersModifiers(macro) then return end
         -- one submenu per modifier key, picking the spell cast while it is held from the page's other learned
         -- spells, grouped by section, as lists of names
@@ -745,7 +778,8 @@ end
 function setMacro(button, macro, bars)
     button.macro = macro
     updateGlow(button, bars or smb.scanActionBars())
-    button.icon:SetTexture(macro.icon)
+    local customIcon = smb.customIcon(macro)
+    button.icon:SetTexture(customIcon and smb.iconTexture(customIcon) or macro.icon)
     button.icon:SetDesaturated(macro.unlearned == true)
     local frameAtlas = macro.unlearned and ATLAS_FRAME_INACTIVE or ATLAS_FRAME
     if hasAtlas(frameAtlas) then button.border:SetAtlas(frameAtlas, false) end

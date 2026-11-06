@@ -35,6 +35,7 @@ src\Data\Warrior.lua
 src\Trainer.lua
 src\Macros.lua
 src\Cleanup.lua
+src\IconPicker.lua
 src\SpellBookTab.lua
 src\ActionBars.lua
 src\Minimap.lua
