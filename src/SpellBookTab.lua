@@ -213,23 +213,27 @@ function smb.showMacroMenu(owner, macro, onChange, actionSlot, plainSpell)
             if picked and not listed then addPick(picked .. " (unavailable)", picked) end
         end
         -- the Icon submenu: Automatic (a bare #showtooltip), the spell it names, from the spells the macro casts,
-        -- or a custom icon from the game's list
+        -- or a custom icon from the game's list. An edited macro's text has its own #showtooltip line, so it
+        -- offers only Automatic (the question mark icon) and a custom icon
         local function addIconMenu()
             if not smb.offersUseItems(macro) then return end
-            local picked = smb.pickedIconSpell(macro)
+            local edited = smb.customBody(macro) ~= nil
+            local picked = not edited and smb.pickedIconSpell(macro) or nil
             local submenu = rootDescription:CreateButton("Icon: "
                 .. (smb.customIcon(macro) and "Custom" or picked or "Automatic"))
             submenu:CreateTitle("Show On The Button")
             local function addPick(label, name)
                 submenu:CreateRadio(label,
-                    function() return smb.pickedIconSpell(macro) == name and not smb.customIcon(macro) end,
+                    function()
+                        return (edited or smb.pickedIconSpell(macro) == name) and not smb.customIcon(macro)
+                    end,
                     function()
                         if not change(function(m) smb.setIconSpell(m, name) end) then return end
                         onChange() -- rewrites the macro and its subtext
                     end)
             end
             addPick("Automatic", nil)
-            local spells = smb.iconSpells(macro)
+            local spells = edited and {} or smb.iconSpells(macro)
             for _, name in ipairs(spells) do addPick(name, name) end
             -- a pick the macro no longer casts stays listed, so the player sees why it does nothing
             if picked and not tContains(spells, picked) then addPick(picked .. " (not in macro)", picked) end
@@ -248,6 +252,13 @@ function smb.showMacroMenu(owner, macro, onChange, actionSlot, plainSpell)
             rootDescription:CreateTitle("Before Using")
             addOption("Stop Attacking", "equipStopAttack")
             addOption("Stop Casting", "equipStopCast")
+            return
+        end
+        -- an edited macro uses the player's text, which no option changes (see smb.customBody), so its menu
+        -- offers only the icon, and Edit Macro and Revert To Automatic below
+        if smb.customBody(macro) then
+            rootDescription:CreateButton("Edited: options are off"):SetEnabled(false)
+            addIconMenu()
             return
         end
         -- a copy has its own options (see settingKey in Macros.lua), led by the one that removes it, but
@@ -536,6 +547,25 @@ function smb.showMacroMenu(owner, macro, onChange, actionSlot, plainSpell)
         if not smb.offersReset(macro) then return end
         rootDescription:CreateDivider()
         local function outOfCombat() return not InCombatLockdown() end
+        -- Edit Macro opens the macro's text to change by hand; Revert To Automatic goes back to the text its
+        -- settings make (see smb.setCustomBody)
+        if smb.offersUseItems(macro) then
+            rootDescription:CreateButton("Edit Macro...", function()
+                smb.showMacroEditor(macro.name, macro.body, smb.generatedBody(macro), function(text)
+                    local saved = false
+                    if not change(function(m) saved = smb.setCustomBody(m, text) end) then return false end
+                    onChange() -- rewrites the macro and its subtext
+                    return saved
+                end)
+                return MenuResponse.Close
+            end):SetEnabled(outOfCombat)
+            if smb.customBody(macro) then
+                rootDescription:CreateButton("Revert To Automatic", function()
+                    if not change(function(m) smb.setCustomBody(m, nil) end) then return end
+                    onChange()
+                end):SetEnabled(outOfCombat)
+            end
+        end
         -- Duplicate Macro adds a variant of a spell macro, set up the same, to set up apart. Only on the page:
         -- a button on an action bar already gets its own copy when changed
         if not macro.equipment and not actionSlot then
@@ -790,6 +820,9 @@ function setMacro(button, macro, bars)
     elseif macro.equipment then
         button.subText:SetText(macro.slotLabel)
         button.subText:SetTextColor(unpack(INK_COLOR))
+    elseif smb.customBody(macro) then
+        button.subText:SetText("Edited")
+        button.subText:SetTextColor(unpack(MOUSEOVER_COLOR))
     elseif macro.enemyPlayer then
         button.subText:SetText("Enemy")
         button.subText:SetTextColor(unpack(MOUSEOVER_COLOR))

@@ -67,7 +67,9 @@ local EQUIPMENT_OPTIONS = { equipStopAttack = true, equipStopCast = true }
 -- list of spell names per spell: the macro /castsequences its own spell, then those, in that order. "followUp"
 -- holds a cooldown spell's one spell name: the macro casts it on the same press, after its own. "iconSpell"
 -- holds one spell name: #showtooltip names it, fixing the button's icon (see smb.iconSpell). "customIcon" holds
--- an icon instead, a file ID or texture name, set as the WoW macro's own (see smb.customIcon). "forms"
+-- an icon instead, a file ID or texture name, set as the WoW macro's own (see smb.customIcon). "customBody"
+-- holds the text the player wrote in the macro's editor, used in place of the body its settings make (see
+-- smb.customBody). "forms"
 -- holds a table per spell name, {[form name] = spell name}: the macro casts that spell while in that form of
 -- the class config's forms (see smb.formSpell). An enemy player copy stores its
 -- own settings under its spell's name plus the copy's suffix, e.g. "Dispel Magic @E" (see settingKey), and a
@@ -1010,6 +1012,13 @@ function smb.customIcon(macro)
     return settings("customIcon")[settingKey(macro)]
 end
 
+-- The text the player wrote for a macro in its editor (see smb.showMacroEditor), used in place of the generated
+-- body, or nil when the macro is generated from its settings.
+function smb.customBody(macro)
+    if not smb.offersUseItems(macro) then return nil end
+    return settings("customBody")[settingKey(macro)]
+end
+
 -- The spell a macro's #showtooltip names, or nil for a bare #showtooltip.
 function smb.iconSpell(macro)
     local picked = smb.pickedIconSpell(macro)
@@ -1460,11 +1469,23 @@ end
 -- A cooldown macro's follow-up cast comes right after its own, then the after-cast lines (racials,
 -- useItemsAfter slots and the lines placed after the cast), in the order the player ticked them, end the macro.
 -- #showtooltip still shows the spell: its /cast comes first.
-local function macroBody(macro)
+local function generatedBody(macro)
     if macro.equipment then return equipmentBody(macro) end
     local body = castBody(macro) .. followUpLine(macro)
     for _, entry in ipairs(sideEntries(macro, "after")) do body = body .. "\n" .. entry[2] end
     return body
+end
+
+-- The text the player wrote in the macro's editor, else the body made from its settings.
+local function macroBody(macro)
+    return smb.customBody(macro) or generatedBody(macro)
+end
+
+smb.MAX_MACRO_BODY = MAX_MACRO_BODY
+
+-- The body a macro has without any text written in its editor (see smb.setCustomBody).
+function smb.generatedBody(macro)
+    return generatedBody(macro)
 end
 
 -- Sets a page macro's body, and tooLong when it is over WoW's limit: such a macro is never created or
@@ -2324,6 +2345,22 @@ function smb.setCustomIcon(macro, icon)
     rewrite(macro, true)
 end
 
+-- Sets the text a macro uses in place of its generated body, or clears it with nil (Revert To Automatic), then
+-- rewrites the macro like smb.toggleOption. Text that is empty, only spaces, the same as the generated body, or
+-- over WoW's limit is not stored: the macro goes back to (or stays) generated, or nothing changes. Returns
+-- whether it was set. Not in combat, when the WoW macro can't be rewritten.
+function smb.setCustomBody(macro, text)
+    if not smb.offersUseItems(macro) or blockedInCombat() then return false end
+    if text then
+        text = text:gsub("\r\n?", "\n"):gsub("%s+$", "")
+        if #text > MAX_MACRO_BODY then return false end
+        if not text:find("%S") or text == generatedBody(macro) then text = nil end
+    end
+    settings("customBody")[settingKey(macro)] = text
+    rewrite(macro)
+    return true
+end
+
 -- Sets the rank a macro casts (nil for Normal, "raid" or "combat"), then rewrites the macro like smb.toggleOption.
 -- It is stored without checking the sequence (see smb.rank): the menu greys the downranks out while one is on.
 function smb.setRank(macro, rank)
@@ -2343,7 +2380,7 @@ local SPELL_SETTINGS = {
     "petAttack", "stopCast", "startAttack", "startAttackBefore", "petAttackAfter", "autoShotBefore",
     "autoShotAfter", "petFollowBefore", "petFollowAfter",
     "stopAttackBefore", "stopAttackAfter", "cancelIceBlockBefore", "clearDeadBefore", "targetEnemyBefore", "useItems", "useItemsAfter", "racials", "racialsAfter", "order", "orderAfter", "modifiers", "forms",
-    "sequence", "followUp", "iconSpell", "customIcon",
+    "sequence", "followUp", "iconSpell", "customIcon", "customBody",
 }
 local EQUIPMENT_SETTINGS = {"equipStopAttack", "equipStopCast"}
 

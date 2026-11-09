@@ -2,7 +2,7 @@
 ## Title: Macroroni
 ## Notes: Adds a spellbook tab of one-click macros for your class's spells, with mouseover and cursor options.
 ## Author: NotStraws (Macroroni fork)
-## Version: v1.2.0
+## Version: v1.3.0
 ## X-Based-On: MacroActionBar v1.2.1
 ## SavedVariables: MacroroniDB
 ## SavedVariablesPerCharacter: MacroroniCharDB
@@ -36,6 +36,7 @@ src\Trainer.lua
 src\Macros.lua
 src\Cleanup.lua
 src\IconPicker.lua
+src\MacroEditor.lua
 src\SpellBookTab.lua
 src\ActionBars.lua
 src\Minimap.lua

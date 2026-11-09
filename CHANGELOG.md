@@ -1,5 +1,12 @@
 # Macroroni
 
+## v1.3.0 (2026-11-08)
+
+- Added Edit Macro... to each spell macro's right-click menu. It opens a window where you can write the macro's text yourself, and Macroroni keeps your text instead of overwriting it.
+- The window shows a character count against WoW's 255 limit, and Automatic Text fills it with the text Macroroni would generate.
+- An edited macro shows "Edited" on the page. Its options are hidden, since they no longer change it, but its Icon menu still works.
+- Revert To Automatic, or Reset To Default, goes back to the generated macro.
+
 ## v1.2.0 (2026-11-06)
 
 - Added an Icon menu to each spell macro's right-click menu.
