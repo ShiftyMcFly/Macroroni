@@ -155,9 +155,23 @@ smb.classConfigs.DRUID = {
     },
 
     custom = {
-        -- no icon, so the page and action bar show Dash's icon and tooltip from #showtooltip
+        -- built from the forms learned, so its form number follows the stance bar: Aquatic Form while swimming,
+        -- else Travel Form, or Cat Form indoors or until Travel Form is learned, then Dash once in Cat Form (when
+        -- learned). A bare #showtooltip, so the button shows the spell it would cast
         { name = "Smart Travel",
-          body = "#showtooltip Dash\n/cast [indoors,noform:2] Cat Form\n"
-              .. "/cast [indoors,form:2] Dash\n/cast [swimming] !Aquatic Form\n/cast !Travel Form" },
+          body = function()
+              local cat = smb.formSlot("Cat Form")
+              local travel = smb.formSlot("Travel Form") and true
+              local picks = {}
+              if smb.formSlot("Aquatic Form") then picks[#picks + 1] = "[swimming] !Aquatic Form" end
+              if cat and smb.knowsSpell("Dash") then
+                  picks[#picks + 1] = (travel and "[indoors,form:" or "[form:") .. cat .. "] Dash"
+              end
+              if cat then picks[#picks + 1] = (travel and "[indoors] " or "") .. "!Cat Form" end
+              if travel then picks[#picks + 1] = "!Travel Form" end
+              if #picks == 0 then picks[1] = "!Travel Form" end -- no form learned yet
+              local shown = travel and "Travel Form" or cat and "Cat Form" or "Aquatic Form"
+              return "#showtooltip\n/cast " .. table.concat(picks, "; "), shown
+          end },
     },
 }

@@ -1175,6 +1175,22 @@ local function stanceSlot(stance)
     return WARRIOR_STANCE_SLOTS[stance]
 end
 
+-- A learned form or stance's slot on the stance bar (the n of [form:n]), or nil when it isn't learned. For
+-- custom macros that build their body (see Config.lua).
+function smb.formSlot(name)
+    for i = 1, GetNumShapeshiftForms() do
+        local spellID = select(4, GetShapeshiftFormInfo(i))
+        if spellID and C_Spell.GetSpellName(spellID) == name then return i end
+    end
+end
+
+-- Whether a spell is in the spellbook's class skill lines (learned). For custom macros that build their body.
+function smb.knowsSpell(name)
+    local found = false
+    forEachSpellInLines(2, nil, function(spell) found = found or spell == name end)
+    return found
+end
+
 -- Whether a spell is one of a stance-using class's (Warriors') stances.
 function smb.isStance(name)
     return classConfig().hasStances and stanceSlot(name) ~= nil
@@ -1616,8 +1632,18 @@ local function macroIconName(icon)
     return icon:match("[^\\/]+$")
 end
 
--- A config custom entry as a page macro. Its body is used as written, and it has no options menu.
-local function makeCustomMacro(entry, index, categoryRank)
+-- A config custom entry's body, and the spell its page button shows: the body as written and its
+-- #showtooltip spell, or what its body function returns (see Config.lua).
+local function customBodyOf(entry)
+    if type(entry.body) ~= "function" then return entry.body, nil end
+    local ok, body, spell = pcall(entry.body)
+    if not ok then return nil end
+    return body, type(spell) == "string" and spell or nil
+end
+
+-- A config custom entry as a page macro. Its body is used as written (or built by its function), and it has
+-- no options menu.
+local function makeCustomMacro(entry, index, categoryRank, body, spell)
     return {
         name = entry.name,
         categoryRank = categoryRank,
@@ -1629,9 +1655,10 @@ local function makeCustomMacro(entry, index, categoryRank)
         cursor = false,
         macroName = entry.name:sub(1, MAX_MACRO_NAME),
         macroIcon = macroIconName(entry.icon) or ICON_QUESTION_MARK,
-        icon = entry.icon or showtooltipIcon(entry.body) or ICON_QUESTION_MARK,
-        tooltipSpell = showtooltipSpell(entry.body),
-        body = entry.body,
+        icon = entry.icon or (spell and getSpellTexture and getSpellTexture(spell)) or showtooltipIcon(body)
+            or ICON_QUESTION_MARK,
+        tooltipSpell = spell or showtooltipSpell(body),
+        body = body,
     }
 end
 
@@ -1649,7 +1676,9 @@ local function addCustomMacros(taken)
     local c = classConfig()
     local categoryRanks = {}
     for i, entry in ipairs(c.custom) do
-        local name, body = type(entry) == "table" and entry.name, type(entry) == "table" and entry.body
+        local name = type(entry) == "table" and entry.name
+        local body, spell
+        if type(entry) == "table" then body, spell = customBodyOf(entry) end
         if type(name) ~= "string" or name == "" or type(body) ~= "string" or body == "" then
             warn("custom macro #" .. i .. " in your class config needs a name and a body.")
         elseif #body > MAX_MACRO_BODY then
@@ -1662,7 +1691,7 @@ local function addCustomMacros(taken)
             local category = entry.category or "Custom"
             -- a config category keeps its place; others follow them in order of first use
             categoryRanks[category] = categoryRanks[category] or c.categoryRankByName[category] or #c.categories + i
-            smb.macros[#smb.macros + 1] = makeCustomMacro(entry, i, categoryRanks[category])
+            smb.macros[#smb.macros + 1] = makeCustomMacro(entry, i, categoryRanks[category], body, spell)
         end
     end
 end
@@ -2029,6 +2058,38 @@ function smb.syncAllMacros()
     for _, macro in ipairs(smb.macros) do
         syncMacro(macro, GetMacroIndexByName(macro.macroName))
     end
+end
+
+-- Rebuilds the custom macros whose config body is a function (see Config.lua) and rewrites their WoW macros
+-- when the text changed, e.g. Smart Travel once Travel Form or Dash is learned. Runs as spells or forms change,
+-- without the page: it reads the class config, not smb.macros, which only the page builds. Out of combat.
+local function updateBuiltMacros()
+    if InCombatLockdown() then return end
+    for _, entry in ipairs(classConfig().custom) do
+        if type(entry) == "table" and type(entry.name) == "string" and type(entry.body) == "function" then
+            local body = customBodyOf(entry)
+            if type(body) == "string" and body ~= "" and #body <= MAX_MACRO_BODY then
+                local macroName = entry.name:sub(1, MAX_MACRO_NAME)
+                local index = GetMacroIndexByName(macroName)
+                if index ~= 0 and select(3, GetMacroInfo(index)) ~= body then EditMacro(index, nil, nil, body) end
+            end
+        end
+    end
+end
+
+do
+    local frame, pending = CreateFrame("Frame"), false
+    frame:RegisterEvent("SPELLS_CHANGED")
+    frame:RegisterEvent("UPDATE_SHAPESHIFT_FORMS")
+    frame:RegisterEvent("PLAYER_REGEN_ENABLED") -- catches up on a change made in combat
+    frame:SetScript("OnEvent", function()
+        if pending then return end -- once per burst
+        pending = true
+        C_Timer.After(0, function()
+            pending = false
+            updateBuiltMacros()
+        end)
+    end)
 end
 
 local MAX_ACTION_SLOTS = 180 -- Classic has 120; empty or missing slots return nil

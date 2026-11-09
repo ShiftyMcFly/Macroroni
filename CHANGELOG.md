@@ -1,5 +1,12 @@
 # Macroroni
 
+## v1.3.1 (2026-11-08)
+
+- Fixed the Druid Smart Travel macro, which shifted out of Cat Form indoors instead of casting Dash once Aquatic Form was learned. It now finds Cat Form on your stance bar instead of assuming it is form 2.
+- Smart Travel uses Cat Form until Travel Form is learned, and leaves Dash out until it is learned.
+- Smart Travel has a bare #showtooltip like the other macros, so its icon follows the form it would cast.
+- Smart Travel updates itself as you learn forms or Dash, without opening the page.
+
 ## v1.3.0 (2026-11-08)
 
 - Added Edit Macro... to each spell macro's right-click menu. It opens a window where you can write the macro's text yourself, and Macroroni keeps your text instead of overwriting it.

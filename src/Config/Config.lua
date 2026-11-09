@@ -173,6 +173,9 @@ local _, smb = ...
 --   "#showtooltip <spell>" shows that spell's icon. description (optional): text the page's tooltip shows
 --   instead of the body while Alt is held. first (optional): true lists the macro before its
 --   section's spells instead of after them.
+--   body can also be a function returning the text, and optionally the spell whose icon and tooltip the page
+--   shows; it can call smb.formSlot(name) (a learned form's stance bar slot, or nil) and smb.knowsSpell(name).
+--   Such a macro is rebuilt whenever spells or forms change (see Smart Travel in Druid.lua).
 --   Editing a body updates the WoW macro the next time the page opens. Removing an entry does not delete
 --   the WoW macro: delete it in /macro.
 
