@@ -1,5 +1,11 @@
 # Macroroni
 
+## v1.5.0 (2026-11-12)
+
+- Added help/harm pairing. An enemy spell's menu has On Friendly, and a friendly spell's has On Enemy: pick a spell to cast instead when the unit is of the other reaction, e.g. a Mouseover Moonfire that casts Regrowth on a friendly mouseover.
+- The pair follows the macro's Cast On (Target, Mouseover or Focus). Each spell in the list has its own Rank choice, Highest by default. Shift, Ctrl, Alt and form picks still come first.
+- Pairing is off with Cursor, Self or Nearest Player, a sequence, a rank 1 cast or a pet ability. A paired macro shows "Help/Harm" on the page.
+
 ## v1.4.0 (2026-11-12)
 
 - Added a Rank menu to each spell macro with more than one trained rank. Highest, the default, always casts your highest rank; picking a rank casts that one, e.g. Moonfire(Rank 3).

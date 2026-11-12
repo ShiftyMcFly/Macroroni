@@ -71,7 +71,9 @@ local EQUIPMENT_OPTIONS = { equipStopAttack = true, equipStopCast = true }
 -- holds the text the player wrote in the macro's editor, used in place of the body its settings make (see
 -- smb.customBody). "spellRank" holds the rank number the spell is cast at, e.g. "Moonfire(Rank 3)", Highest
 -- when unset (see smb.pickedRank); a modifier key's spell keeps its own in "modifiers" as shiftRank (ctrlRank,
--- altRank). "forms"
+-- altRank). "pairSpell" holds one spell name, of the other reaction: the macro casts it when the unit is
+-- friendly (for an enemy spell) or an enemy (for a friendly spell) (see smb.pairMacro), at the rank number in
+-- "pairRank", or Highest when unset. "forms"
 -- holds a table per spell name, {[form name] = spell name}: the macro casts that spell while in that form of
 -- the class config's forms (see smb.formSpell). An enemy player copy stores its
 -- own settings under its spell's name plus the copy's suffix, e.g. "Dispel Magic @E" (see settingKey), and a
@@ -1003,12 +1005,65 @@ function smb.iconSpells(macro)
     for _, form in ipairs(smb.formNames()) do add(smb.formSpell(macro, form)) end
     for _, mod in ipairs(smb.MODIFIERS) do add(smb.modifierSpell(macro, mod)) end
     for _, name in ipairs(sequenceSteps(macro) or NO_SLOTS) do add(name) end
+    local pair = smb.pairMacro(macro)
+    if pair then add(pair.name) end
     local followUp = followUpMacro(macro)
     if followUp then add(followUp.name) end
     for _, side in ipairs({"before", "after"}) do
         for _, name in ipairs(racialsOn(macro, side)) do add(name) end
     end
     return spells
+end
+
+-- Whether a macro can pair its spell with one of the other reaction (see smb.pairMacro): a friendly or enemy
+-- spell macro, not an enemy player copy.
+function smb.offersPair(macro)
+    return smb.offersUseItems(macro) and (macro.target == "help" or macro.target == "harm")
+        and not macro.enemyPlayer and not macro.unlearned
+end
+
+-- Why a macro's pair can't be cast right now, or nil when it can: the pairing goes by whether the unit is
+-- friendly or an enemy, which Cursor, Self and Nearest Player don't check, and it can't be fitted into a
+-- sequence, a downrank's rank 1 clauses or a pet ability's cast.
+function smb.pairBlocked(macro)
+    local castOn = smb.castOn(macro)
+    if castOn ~= nil and castOn ~= "mouseover" and castOn ~= "focus" then return "cast on " .. castOn end
+    if smb.hasSequenceOn(macro) then return "sequence" end
+    if smb.rank(macro) ~= nil then return "rank 1 casts" end
+    if smb.isOptionOn(macro, "pet") then return "pet ability" end
+end
+
+-- Whether another page macro's spell can be a macro's pair: a learned spell of the other reaction.
+function smb.canPair(macro, other)
+    return not other.unlearned and not other.custom and other.name ~= macro.name
+        and (other.target == "help" or other.target == "harm") and other.target ~= macro.target
+end
+
+-- The spell picked as a macro's pair, or nil. It may no longer be castable: smb.pairMacro ignores it then.
+function smb.pairSpell(macro)
+    if not smb.offersPair(macro) then return nil end
+    return settings("pairSpell")[settingKey(macro)]
+end
+
+-- The page macro of the spell a macro casts when the unit is of the other reaction (an enemy spell's friendly
+-- pair, or a friendly spell's enemy pair), or nil when it has none or it can't be cast now.
+function smb.pairMacro(macro)
+    local other = smb.macroByName[smb.pairSpell(macro) or ""]
+    if other and smb.canPair(macro, other) and not smb.pairBlocked(macro) then return other end
+end
+
+-- The rank picked for a macro's pair spell, or nil for Highest. storedOnly returns it even when that rank isn't
+-- trained (for the menu); otherwise such a rank reads as Highest, keeping the setting.
+function smb.pairRank(macro, storedOnly)
+    if not smb.offersPair(macro) then return nil end
+    local rank = settings("pairRank")[settingKey(macro)]
+    if storedOnly or not rank then return rank end
+    if tContains(smb.trainedRanks(smb.pairSpell(macro) or ""), rank) then return rank end
+end
+
+-- Whether a macro casts a pair spell.
+function smb.hasPairOn(macro)
+    return smb.pairMacro(macro) ~= nil
 end
 
 -- The spell picked for a macro's icon, or nil for Automatic. It may no longer be in the macro: its setting is
@@ -1491,6 +1546,22 @@ local function castBody(macro)
         return header .. cast(cond(spam, "@player"))
     end
     local onTarget = fallback and cond(spam, "help,nodead") .. cond(spam, "@player") or "[" .. (spam or "") .. "]"
+    -- a pair spell is cast where the unit is of its reaction, before the macro's own spell is cast there:
+    -- at the mouseover (or focus) first, then the target, e.g. "[@mouseover,help,nodead] Regrowth;
+    -- [@mouseover,harm,nodead] Moonfire; [help,nodead] Regrowth; Moonfire"
+    local pair = smb.pairMacro(macro)
+    if pair then
+        -- at the rank picked for it in this macro's menu (see smb.pairRank), the highest by default
+        local pairName = smb.rankedName(smb.castName(pair, true), smb.pairRank(macro))
+        local clauses = {}
+        if castOn == "mouseover" or castOn == "focus" then
+            clauses[1] = "[@" .. castOn .. "," .. pair.target .. ",nodead] " .. pairName
+            clauses[2] = cond(spam, "@" .. castOn .. "," .. macro.target .. ",nodead") .. " " .. name
+        end
+        clauses[#clauses + 1] = "[" .. pair.target .. ",nodead] " .. pairName
+        clauses[#clauses + 1] = (onTarget ~= "[]" and onTarget .. " " or "") .. name
+        return header .. "/cast " .. mods .. table.concat(clauses, "; ")
+    end
     if castOn == "mouseover" or castOn == "focus" then
         return header .. cast(cond(spam, "@" .. castOn .. "," .. macro.target .. ",nodead") .. onTarget)
     end
@@ -2513,6 +2584,14 @@ function smb.setCustomBody(macro, text)
     return true
 end
 
+-- Sets the spell a macro casts when the unit is of the other reaction (see smb.pairMacro), or clears it with
+-- nil, at rank (nil for Highest, see smb.pairRank), then rewrites the macro like smb.toggleOption.
+function smb.setPairSpell(macro, name, rank)
+    settings("pairSpell")[settingKey(macro)] = name
+    settings("pairRank")[settingKey(macro)] = name and rank or nil
+    rewrite(macro)
+end
+
 -- Sets the rank a macro's spell is cast at (a rank number, or nil for Highest), then rewrites the macro like
 -- smb.toggleOption.
 function smb.setSpellRank(macro, rank)
@@ -2539,7 +2618,7 @@ local SPELL_SETTINGS = {
     "petAttack", "stopCast", "startAttack", "startAttackBefore", "petAttackAfter", "autoShotBefore",
     "autoShotAfter", "petFollowBefore", "petFollowAfter",
     "stopAttackBefore", "stopAttackAfter", "cancelIceBlockBefore", "clearDeadBefore", "targetEnemyBefore", "useItems", "useItemsAfter", "racials", "racialsAfter", "order", "orderAfter", "modifiers", "forms",
-    "sequence", "followUp", "iconSpell", "customIcon", "customBody", "spellRank",
+    "sequence", "followUp", "iconSpell", "customIcon", "customBody", "spellRank", "pairSpell", "pairRank",
 }
 local EQUIPMENT_SETTINGS = {"equipStopAttack", "equipStopCast"}
 

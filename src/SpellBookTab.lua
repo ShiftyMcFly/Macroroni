@@ -208,6 +208,67 @@ function smb.showMacroMenu(owner, macro, onChange, actionSlot, plainSpell)
             -- a pick no longer learned or moved out of its section stays listed, so it can be changed back
             if picked and not listed then addPick(picked .. " (unavailable)", picked) end
         end
+        -- the On Friendly submenu of an enemy spell (On Enemy of a friendly spell): the spell cast instead when
+        -- the unit is of the other reaction, from the spells smb.canPair allows, under their section's title.
+        -- Greyed out (but for clearing a pick) where it can't be cast (see smb.pairBlocked)
+        local function addPairMenu()
+            if not smb.offersPair(macro) then return end
+            local label = macro.target == "harm" and "On Friendly" or "On Enemy"
+            local picked = smb.pairSpell(macro)
+            local blocked = smb.pairBlocked(macro)
+            local submenu = rootDescription:CreateButton(label .. ": "
+                .. (picked and smb.rankedName(picked, smb.pairRank(macro)) or "None")
+                .. (picked and blocked and " (off)" or ""))
+            submenu:SetEnabled(blocked == nil or picked ~= nil)
+            submenu:CreateTitle(macro.target == "harm" and "Cast When The Unit Is Friendly"
+                or "Cast When The Unit Is An Enemy")
+            if blocked then submenu:CreateButton("Off with " .. blocked):SetEnabled(false) end
+            local function pick(name, rank)
+                if not change(function(m) smb.setPairSpell(m, name, rank) end) then return end
+                onChange() -- rewrites the macro and its subtext
+            end
+            -- clicking a spell picks it at its highest rank; one with more than one trained rank also gets a
+            -- Rank list: Highest (smb.pairRank's nil), then each rank
+            local function addPick(pickLabel, name)
+                local radio = submenu:CreateRadio(pickLabel,
+                    function() return smb.pairSpell(macro) == name end,
+                    function() pick(name) end)
+                if blocked and name then
+                    radio:SetEnabled(false)
+                    return
+                end
+                local ranks = name and smb.trainedRanks(name) or {}
+                if #ranks < 2 then return end
+                radio:CreateTitle("Rank")
+                local function addRank(rankLabel, rank)
+                    radio:CreateRadio(rankLabel, function()
+                        return smb.pairSpell(macro) == name and smb.pairRank(macro, true) == rank
+                    end, function() pick(name, rank) end)
+                end
+                addRank("Highest", nil)
+                for _, rank in ipairs(ranks) do addRank("Rank " .. rank, rank) end
+                -- a pick no longer trained stays listed, so the player sees why it casts the highest rank
+                local stored = smb.pairSpell(macro) == name and smb.pairRank(macro, true) or nil
+                if stored and not tContains(ranks, stored) then addRank("Rank " .. stored .. " (not trained)", stored) end
+            end
+            addPick("None", nil)
+            local listed, section = false, nil
+            for _, lastPass in ipairs({false, true}) do
+                for _, other in ipairs(smb.macros) do
+                    if smb.macroByName[other.name] == other and smb.canPair(macro, other)
+                        and smb.menuLast(other.category) == lastPass then
+                        if other.category ~= section then
+                            section = other.category
+                            submenu:CreateTitle(sectionLabel(section))
+                        end
+                        if other.name == picked then listed = true end
+                        addPick(other.name, other.name)
+                    end
+                end
+            end
+            -- a pick no longer learned stays listed, so it can be changed back
+            if picked and not listed then addPick(picked .. " (unavailable)", picked) end
+        end
         -- the Icon submenu: Automatic (a bare #showtooltip), the spell it names, from the spells the macro casts,
         -- or a custom icon from the game's list. An edited macro's text has its own #showtooltip line, so it
         -- offers only Automatic (the question mark icon) and a custom icon
@@ -415,6 +476,7 @@ function smb.showMacroMenu(owner, macro, onChange, actionSlot, plainSpell)
         addSide("after")
         addSequenceMenu()
         addFollowUpMenu()
+        addPairMenu()
         addIconMenu()
         if not smb.offersModifiers(macro) then return end
         -- one submenu per modifier key, picking the spell cast while it is held from the page's other learned
@@ -860,6 +922,9 @@ function setMacro(button, macro, bars)
         button.subText:SetTextColor(unpack(MOUSEOVER_COLOR))
     elseif smb.isOptionOn(macro, "pet") then
         button.subText:SetText("Pet")
+        button.subText:SetTextColor(unpack(MOUSEOVER_COLOR))
+    elseif smb.hasPairOn(macro) then -- before the Cast On ones: a pair goes with Target, Mouseover or Focus
+        button.subText:SetText("Help/Harm")
         button.subText:SetTextColor(unpack(MOUSEOVER_COLOR))
     elseif smb.castOn(macro) == "cursor" then
         button.subText:SetText("Cursor")
