@@ -60,10 +60,6 @@ end
 -- Blizzard's spellbook) whose macro this is.
 local COPY_KEYS = {enemyPlayer = true}
 
--- The Rank submenu's choices, in order: smb.rank's values (none for Normal) and their labels. Rank 1 Out Of
--- Combat ("combat") is a checkbox of its own instead.
-local RANKS = {{label = "Normal"}, {rank = "raid", label = "Downrank In Raids"}}
-
 -- The labels of a modifier pick's Cast On modes but Target (see smb.modifierCastOn).
 local CAST_ON_LABELS = {mouseover = "Mouseover", focus = "Focus", cursor = "Cursor", self = "Self"}
 
@@ -273,39 +269,48 @@ function smb.showMacroMenu(owner, macro, onChange, actionSlot, plainSpell)
             addCastOn()
             if macro.petAbility then addOption("Cast " .. macro.petAbility .. " If Summoned", "pet") end
         end
-        -- the Rank submenu, for the class config's raidRank1 spells: one radio per rank the macro offers
-        if macro.raidRank1 then
-            local current = "Normal"
-            for _, choice in ipairs(RANKS) do
-                if choice.rank == smb.rank(macro) then current = choice.label end
+        -- the Rank submenu: Highest (a /cast without a rank) or one of the trained ranks (see smb.pickedRank),
+        -- then, for the class config's raidRank1 and combatRank1 spells, the rank 1 casts in raids or out of
+        -- combat, which go with either
+        local downranks = smb.offersRank(macro, "raid") or smb.offersRank(macro, "combat")
+        if smb.offersRankPick(macro) or downranks then
+            local picked = smb.pickedRank(macro)
+            local submenu = rootDescription:CreateButton("Rank: " .. (picked and "Rank " .. picked or "Highest"))
+            submenu:CreateTitle("Cast At Rank")
+            local function addPick(label, rank)
+                submenu:CreateRadio(label,
+                    function() return smb.storedRank(macro) == rank end,
+                    function()
+                        if not change(function(m) smb.setSpellRank(m, rank) end) then return end
+                        onChange() -- rewrites the macro and its subtext
+                    end)
             end
-            local submenu = rootDescription:CreateButton("Rank: " .. current)
-            submenu:CreateTitle("Rank")
-            for _, choice in ipairs(RANKS) do
-                if smb.offersRank(macro, choice.rank) then
-                    local radio = submenu:CreateRadio(choice.label,
-                        function() return smb.rank(macro) == choice.rank end,
+            addPick("Highest", nil)
+            local ranks = smb.trainedRanks(macro.name)
+            if #ranks > 1 then
+                for _, rank in ipairs(ranks) do addPick("Rank " .. rank, rank) end
+            end
+            -- a pick no longer trained stays listed, so the player sees why it casts the highest rank
+            local stored = smb.storedRank(macro)
+            if stored and not tContains(ranks, stored) then addPick("Rank " .. stored .. " (not trained)", stored) end
+            if downranks then
+                submenu:CreateDivider()
+                submenu:CreateTitle("Cast Rank 1")
+                -- one at a time (smb.rank holds one); greyed out while a sequence is on, which can't downrank
+                -- (see castBody in Macros.lua)
+                local function addDownrank(label, rank)
+                    if not smb.offersRank(macro, rank) then return end
+                    submenu:CreateCheckbox(label,
+                        function() return smb.rank(macro) == rank end,
                         function()
-                            if not change(function(m) smb.setRank(m, choice.rank) end) then return end
+                            local new = smb.rank(macro) ~= rank and rank or nil
+                            if not change(function(m) smb.setRank(m, new) end) then return end
                             onChange() -- rewrites the macro and its subtext
-                        end)
-                    -- a sequence can't downrank (see castBody in Macros.lua)
-                    if choice.rank ~= nil then
-                        radio:SetEnabled(function() return not smb.hasSequenceOn(macro) end)
-                    end
+                        end):SetEnabled(function() return not smb.hasSequenceOn(macro) end)
                 end
+                addDownrank("In Raids", "raid")
+                addDownrank("Out Of Combat", "combat")
             end
-        end
-        -- Rank 1 Out Of Combat, for the class config's combatRank1 spells: the "combat" rank, ticked, or Normal.
-        -- Greyed out while a sequence is on, which can't downrank (see castBody in Macros.lua)
-        if smb.offersRank(macro, "combat") then
-            rootDescription:CreateCheckbox("Rank 1 Out Of Combat",
-                function() return smb.rank(macro) == "combat" end,
-                function()
-                    local rank = smb.rank(macro) ~= "combat" and "combat" or nil
-                    if not change(function(m) smb.setRank(m, rank) end) then return end
-                    onChange() -- rewrites the macro and its subtext
-                end):SetEnabled(function() return not smb.hasSequenceOn(macro) end)
         end
         -- "Don't Toggle Off On Recast" (Auto Shot) sits below Cast On Enemy Player instead
         local noToggle = macro.spam and macro.spam:match("^[^:]+") == "!"
@@ -428,10 +433,19 @@ function smb.showMacroMenu(owner, macro, onChange, actionSlot, plainSpell)
         rootDescription:CreateDivider()
         for _, mod in ipairs(smb.MODIFIERS) do
             local label = MODIFIER_LABELS[mod]
-            -- picks a spell (nil for None), cast where castOn says (see smb.modifierCastOn)
-            local function pick(name, castOn)
-                if not change(function(m) smb.setModifierSpell(m, mod, name, castOn) end) then return end
+            -- picks a spell (nil for None), cast where castOn says (see smb.modifierCastOn), at rank (nil for
+            -- Highest, see smb.modifierRank)
+            local function pick(name, castOn, rank)
+                if not change(function(m) smb.setModifierSpell(m, mod, name, castOn, rank) end) then return end
                 onChange() -- rewrites the macro and its subtext
+            end
+            -- the Cast On and rank this key has for a spell while it is the one picked, so changing one keeps
+            -- the other
+            local function keptCastOn(name)
+                return smb.modifierSpell(macro, mod) == name and smb.modifierCastOn(macro, mod) or nil
+            end
+            local function keptRank(name)
+                return smb.modifierSpell(macro, mod) == name and smb.modifierRank(macro, mod, true) or nil
             end
             local function pickSlot(slot)
                 if not change(function(m) smb.setModifierSlot(m, mod, slot) end) then return end
@@ -442,39 +456,57 @@ function smb.showMacroMenu(owner, macro, onChange, actionSlot, plainSpell)
             local currentCastOn = smb.modifierCastOn(macro, mod)
             local other = current and smb.macroByName[current]
             if not (other and currentCastOn and smb.offersCastOn(other, currentCastOn)) then currentCastOn = nil end
+            local currentRank = smb.modifierRank(macro, mod)
             local submenu = rootDescription:CreateButton(label .. ": " .. (currentSlot and smb.slotLabel(currentSlot)
-                or current and current .. (currentCastOn and " (" .. CAST_ON_LABELS[currentCastOn] .. ")" or "")
+                or current and smb.rankedName(current, currentRank)
+                    .. (currentCastOn and " (" .. CAST_ON_LABELS[currentCastOn] .. ")" or "")
                 or "None"))
             submenu:CreateTitle("Cast While " .. label .. " Is Held")
             submenu:CreateRadio("None", function()
                 return smb.modifierSpell(macro, mod) == nil and smb.modifierSlot(macro, mod) == nil
             end, function() pick(nil) end)
             -- a spell that can be cast anywhere but its target gets a Cast On submenu, set for this key alone:
-            -- Target (smb.modifierCastOn's nil), then the modes the spell offers. Clicking the spell itself
-            -- picks it on Target
-            local function addPickCastOn(radio, name)
+            -- Target (smb.modifierCastOn's nil), then the modes the spell offers; and a spell with more than one
+            -- trained rank gets a Rank list there too: Highest (smb.modifierRank's nil), then each rank. Clicking
+            -- the spell itself picks it on Target at its highest rank
+            local function addPickOptions(radio, name)
                 local picked = smb.macroByName[name]
-                if not smb.offersCastOn(picked, "mouseover") and not smb.offersCastOn(picked, "cursor")
-                    and not smb.offersCastOn(picked, "self") then return end
-                radio:CreateTitle("Cast On")
-                local function addMode(modeLabel, mode)
-                    if mode ~= nil and not smb.offersCastOn(picked, mode) then return end
-                    radio:CreateRadio(modeLabel, function()
-                        return smb.modifierSpell(macro, mod) == name and smb.modifierCastOn(macro, mod) == mode
-                    end, function() pick(name, mode) end)
+                if smb.offersCastOn(picked, "mouseover") or smb.offersCastOn(picked, "cursor")
+                    or smb.offersCastOn(picked, "self") then
+                    radio:CreateTitle("Cast On")
+                    local function addMode(modeLabel, mode)
+                        if mode ~= nil and not smb.offersCastOn(picked, mode) then return end
+                        radio:CreateRadio(modeLabel, function()
+                            return smb.modifierSpell(macro, mod) == name and smb.modifierCastOn(macro, mod) == mode
+                        end, function() pick(name, mode, keptRank(name)) end)
+                    end
+                    addMode("Target", nil)
+                    addMode("Mouseover", "mouseover")
+                    addMode("Focus", "focus")
+                    addMode("Cursor", "cursor")
+                    addMode("Self", "self")
                 end
-                addMode("Target", nil)
-                addMode("Mouseover", "mouseover")
-                addMode("Focus", "focus")
-                addMode("Cursor", "cursor")
-                addMode("Self", "self")
+                local ranks = smb.trainedRanks(name)
+                if #ranks > 1 then
+                    radio:CreateTitle("Rank")
+                    local function addRank(rankLabel, rank)
+                        radio:CreateRadio(rankLabel, function()
+                            return smb.modifierSpell(macro, mod) == name and smb.modifierRank(macro, mod, true) == rank
+                        end, function() pick(name, keptCastOn(name), rank) end)
+                    end
+                    addRank("Highest", nil)
+                    for _, rank in ipairs(ranks) do addRank("Rank " .. rank, rank) end
+                    -- a pick no longer trained stays listed, so the player sees why it casts the highest rank
+                    local stored = keptRank(name)
+                    if stored and not tContains(ranks, stored) then addRank("Rank " .. stored .. " (not trained)", stored) end
+                end
             end
             local listed = false
             for _, section in ipairs(menuOrder(sections)) do
                 local sectionMenu = submenu:CreateButton(sectionLabel(section.name))
                 for _, name in ipairs(section) do
                     listed = listed or name == current
-                    addPickCastOn(sectionMenu:CreateRadio(name,
+                    addPickOptions(sectionMenu:CreateRadio(name,
                         function() return smb.modifierSpell(macro, mod) == name end,
                         function() pick(name) end), name)
                 end
@@ -873,6 +905,9 @@ function setMacro(button, macro, bars)
         button.subText:SetTextColor(unpack(MOUSEOVER_COLOR))
     elseif smb.rank(macro) == "combat" then
         button.subText:SetText("OOC R1")
+        button.subText:SetTextColor(unpack(MOUSEOVER_COLOR))
+    elseif smb.pickedRank(macro) then
+        button.subText:SetText("Rank " .. smb.pickedRank(macro))
         button.subText:SetTextColor(unpack(MOUSEOVER_COLOR))
     elseif smb.isOptionOn(macro, "spam") then
         button.subText:SetText(spamLabels(macro)[2])

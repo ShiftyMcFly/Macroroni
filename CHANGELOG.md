@@ -1,5 +1,13 @@
 # Macroroni
 
+## v1.4.0 (2026-11-12)
+
+- Added a Rank menu to each spell macro with more than one trained rank. Highest, the default, always casts your highest rank; picking a rank casts that one, e.g. Moonfire(Rank 3).
+- The Shift, Ctrl and Alt picks have their own Rank choice, next to their Cast On choice. It defaults to Highest.
+- Form, Then Cast and sequence spells cast at the rank their own macro picked.
+- Downrank In Raids and Rank 1 Out Of Combat moved into the Rank menu, as In Raids and Out Of Combat, and work with a picked rank.
+- A macro with a picked rank shows it on the page.
+
 ## v1.3.1 (2026-11-08)
 
 - Fixed the Druid Smart Travel macro, which shifted out of Cat Form indoors instead of casting Dash once Aquatic Form was learned. It now finds Cat Form on your stance bar instead of assuming it is form 2.

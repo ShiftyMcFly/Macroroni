@@ -69,7 +69,9 @@ local EQUIPMENT_OPTIONS = { equipStopAttack = true, equipStopCast = true }
 -- holds one spell name: #showtooltip names it, fixing the button's icon (see smb.iconSpell). "customIcon" holds
 -- an icon instead, a file ID or texture name, set as the WoW macro's own (see smb.customIcon). "customBody"
 -- holds the text the player wrote in the macro's editor, used in place of the body its settings make (see
--- smb.customBody). "forms"
+-- smb.customBody). "spellRank" holds the rank number the spell is cast at, e.g. "Moonfire(Rank 3)", Highest
+-- when unset (see smb.pickedRank); a modifier key's spell keeps its own in "modifiers" as shiftRank (ctrlRank,
+-- altRank). "forms"
 -- holds a table per spell name, {[form name] = spell name}: the macro casts that spell while in that form of
 -- the class config's forms (see smb.formSpell). An enemy player copy stores its
 -- own settings under its spell's name plus the copy's suffix, e.g. "Dispel Magic @E" (see settingKey), and a
@@ -822,6 +824,16 @@ function smb.modifierCastOn(macro, mod)
     return spells and spells[mod .. "CastOn"]
 end
 
+-- The rank picked for the spell set for a modifier key, or nil for Highest. storedOnly returns it even when that
+-- rank isn't trained (for the menu); otherwise such a rank reads as Highest, keeping the setting.
+function smb.modifierRank(macro, mod, storedOnly)
+    if not smb.offersModifiers(macro) then return nil end
+    local spells = settings("modifiers")[settingKey(macro)]
+    local rank = spells and spells[mod .. "Rank"]
+    if storedOnly or not rank then return rank end
+    if tContains(smb.trainedRanks(spells[mod]), rank) then return rank end
+end
+
 -- Whether a macro has a spell or an equipment slot set for any modifier key.
 function smb.hasModifierOn(macro)
     for _, mod in ipairs(smb.MODIFIERS) do
@@ -1037,10 +1049,13 @@ end
 -- which starts it but never toggles it off.
 local NO_TOGGLE = "!"
 
--- The name a spell macro's /cast uses: "!<spell>" for a toggle spell with its spam option on.
-function smb.castName(macro)
-    if macro.spam == NO_TOGGLE and smb.isOptionOn(macro, "spam") then return NO_TOGGLE .. macro.name end
-    return macro.name
+-- The name a spell macro's /cast uses: "!<spell>" for a toggle spell with its spam option on, with its picked
+-- rank, e.g. "Moonfire(Rank 3)" (see smb.pickedRank). unranked leaves the rank off.
+function smb.castName(macro, unranked)
+    local name = macro.name
+    if macro.spam == NO_TOGGLE and smb.isOptionOn(macro, "spam") then name = NO_TOGGLE .. name end
+    if unranked then return name end
+    return smb.rankedName(name, smb.pickedRank(macro))
 end
 
 -- A macro conditional joining the given conditions (nil or "" ones are skipped) behind the always-present
@@ -1064,12 +1079,12 @@ local function selfFallback(macro)
         and not macro.enemyPlayer
 end
 
--- A /cast of name that tries each target conditional in turn ("" for none), with a rank 1 cast under when
--- (e.g. "group:raid") before each one. prefix ("" for none) goes before the clauses: the modifier clauses.
-local function rank1Cast(name, targets, spam, prefix, when)
+-- A /cast of name that tries each target conditional in turn ("" for none), with a rank 1 cast of rank1 under
+-- when (e.g. "group:raid") before each one. prefix ("" for none) goes before the clauses: the modifier clauses.
+local function rank1Cast(name, rank1, targets, spam, prefix, when)
     local clauses = {}
     for _, target in ipairs(targets) do
-        clauses[#clauses + 1] = cond(spam, target, when) .. " " .. name .. "(Rank 1)"
+        clauses[#clauses + 1] = cond(spam, target, when) .. " " .. smb.rankedName(rank1, 1)
         local plain = cond(spam, target)
         clauses[#clauses + 1] = (plain ~= "" and plain .. " " or "") .. name
     end
@@ -1090,8 +1105,12 @@ smb.macroByMacroName = {}
 -- noToggle, a toggle spell, such as an aspect, is always cast as "!<spell>", whatever its own page macro's
 -- spam option. With no condition (nil), the clause has none of its own, e.g. "[@cursor] Blizzard; ", or
 -- "Fireball; " for a plain cast. castOn ("target", "mouseover", "focus", "cursor" or "self") casts it there instead.
-local function targetedClause(condition, other, noToggle, castOn)
-    local name = noToggle and other.spam == NO_TOGGLE and NO_TOGGLE .. other.name or smb.castName(other)
+-- The spell is cast at the rank its own page macro picked (see smb.pickedRank), or at rank instead: a rank
+-- number, or false for Highest.
+local function targetedClause(condition, other, noToggle, castOn, rank)
+    local base = noToggle and other.spam == NO_TOGGLE and NO_TOGGLE .. other.name or smb.castName(other, true)
+    if rank == nil then rank = smb.pickedRank(other) end
+    local name = smb.rankedName(base, rank or nil)
     local conditional = condition and "[" .. condition .. "]" or ""
     if castOn == nil then
         castOn = smb.castOn(other)
@@ -1138,7 +1157,7 @@ local function modifierClauses(macro)
             -- on the target unless the pick's Cast On is one the spell offers
             local castOn = smb.modifierCastOn(macro, mod)
             if not (castOn and smb.offersCastOn(other, castOn)) then castOn = "target" end
-            clauses[#clauses + 1] = targetedClause("mod:" .. mod, other, true, castOn)
+            clauses[#clauses + 1] = targetedClause("mod:" .. mod, other, true, castOn, smb.modifierRank(macro, mod) or false)
         end
     end
     return table.concat(clauses)
@@ -1410,7 +1429,11 @@ local function castBody(macro)
     local header = "#showtooltip" .. (iconSpell and " " .. iconSpell or "") .. "\n" .. table.concat(before)
     -- with a sequence, every step is cast like the macro's own spell
     local steps = sequenceSteps(macro)
-    if steps then steps[1] = name end
+    if steps then
+        -- each later step at the rank its own page macro picked
+        for i = 2, #steps do steps[i] = smb.rankedName(steps[i], smb.pickedRank(smb.macroByName[steps[i]])) end
+        steps[1] = name
+    end
     -- "/cast <conditional> name", or "/cast name" when there is no conditional; with a sequence,
     -- "/castsequence <conditional> reset=2 name, step 2, ..."
     local function cast(conditional)
@@ -1444,7 +1467,7 @@ local function castBody(macro)
             targets[#targets + 1] = "@player"
         end
         return header .. (castOn == "nearest" and NEAREST_LINE or "") .. (macro.enemyPlayer and ENEMY_LINE or "")
-            .. rank1Cast(name, targets, spam, mods, RANK_CONDITION[rank]) .. (macro.enemyPlayer and LAST_TARGET_FOOTER or "")
+            .. rank1Cast(name, smb.castName(macro, true), targets, spam, mods, RANK_CONDITION[rank]) .. (macro.enemyPlayer and LAST_TARGET_FOOTER or "")
     end
     -- a macro cast on the nearest player casts on the player it just targeted, or on you when no friendly
     -- player is near
@@ -1796,6 +1819,72 @@ local function rankOf(id)
     return subtext and tonumber(subtext:match("%d+"))
 end
 
+local isPlayerSpell = IsPlayerSpell or IsSpellKnown
+
+-- The ranks this character has trained of each spell, by name, as sorted lists of rank numbers, from the
+-- spellbook (which lists each rank) and the trainer spells (Data/ and Trainer.lua), each id checked as known.
+-- Built when first asked for after smb.collectMacros starts over, so it follows what is trained.
+local trainedRanks
+
+local function buildTrainedRanks()
+    local found = {}
+    local function consider(name, id)
+        if not (name and id) or not isPlayerSpell(id) then return end
+        local rank = rankOf(id)
+        if not rank then return end
+        found[name] = found[name] or {}
+        found[name][rank] = true
+    end
+    forEachSpellInLines(2, nil, function(name, _, id) consider(name, id) end)
+    for _, list in ipairs({smb.trainerSpells[select(2, UnitClass("player"))] or {}, smb.recordedTrainerSpells()}) do
+        for _, spell in ipairs(list) do
+            if isPlayerSpell(spell.id) then consider(spellName(spell.id), spell.id) end
+        end
+    end
+    trainedRanks = {}
+    for name, set in pairs(found) do
+        local ranks = {}
+        for rank in pairs(set) do ranks[#ranks + 1] = rank end
+        table.sort(ranks)
+        trainedRanks[name] = ranks
+    end
+end
+
+-- The ranks of a spell this character has trained, lowest first, e.g. {1, 2, 3}; empty for a spell without
+-- ranks or not learned.
+function smb.trainedRanks(name)
+    if not trainedRanks then buildTrainedRanks() end
+    return trainedRanks[name] or NO_SLOTS
+end
+
+-- Forgets the trained ranks, so the next smb.trainedRanks reads them again.
+local function forgetTrainedRanks()
+    trainedRanks = nil
+end
+
+-- Whether a spell has a rank to pick: more than one trained.
+function smb.offersRankPick(macro)
+    return smb.offersUseItems(macro) and not macro.unlearned and #smb.trainedRanks(macro.name) > 1
+end
+
+-- The rank picked for a macro, or nil for Highest. It may no longer be trained: smb.pickedRank ignores it then,
+-- keeping the setting.
+function smb.storedRank(macro)
+    if not smb.offersUseItems(macro) then return nil end
+    return settings("spellRank")[settingKey(macro)]
+end
+
+-- The rank a macro casts: its picked rank while trained, else nil for Highest (a /cast without a rank).
+function smb.pickedRank(macro)
+    local rank = smb.storedRank(macro)
+    if rank and tContains(smb.trainedRanks(macro.name), rank) then return rank end
+end
+
+-- A spell name with a rank, as /cast takes it: "Moonfire(Rank 3)", or the name alone for nil (Highest).
+function smb.rankedName(name, rank)
+    return rank and name .. "(Rank " .. rank .. ")" or name
+end
+
 -- Whether a spell isn't rank 1: its subtext says a higher rank, or it requires its own previous rank. Nil
 -- while a required spell's name isn't loaded.
 local function isHigherRank(spell, name)
@@ -1886,6 +1975,7 @@ end
 -- Rebuilds smb.macros: the learned spells (from the spellbook), the class config's custom macros and the
 -- equipped items with a "Use:" effect, plus the spells not learned yet when smb.showsUnlearned().
 function smb.collectMacros()
+    forgetTrainedRanks()
     wipe(smb.macros)
     local taken, seen = {}, {}
     -- appends a spell's macro, the copies its options turn on and this character's variants of them. An
@@ -2339,11 +2429,12 @@ end
 -- Sets the spell a macro casts while a modifier key ("shift", "ctrl" or "alt") is held, or clears it with
 -- nil, then rewrites the macro like smb.toggleOption. castOn ("mouseover", "focus", "cursor" or "self", or nil for the
 -- target) sets where it is cast (see smb.modifierCastOn).
-function smb.setModifierSpell(macro, mod, name, castOn)
+function smb.setModifierSpell(macro, mod, name, castOn, rank)
     local set = settings("modifiers")
     local spells = set[settingKey(macro)] or {}
     spells[mod], spells[mod .. "Slot"] = name, nil
     spells[mod .. "CastOn"] = name and castOn or nil
+    spells[mod .. "Rank"] = name and rank or nil
     set[settingKey(macro)] = next(spells) and spells or nil
     rewrite(macro)
 end
@@ -2353,7 +2444,7 @@ end
 function smb.setModifierSlot(macro, mod, slot)
     local set = settings("modifiers")
     local spells = set[settingKey(macro)] or {}
-    spells[mod], spells[mod .. "Slot"], spells[mod .. "CastOn"] = nil, slot, nil
+    spells[mod], spells[mod .. "Slot"], spells[mod .. "CastOn"], spells[mod .. "Rank"] = nil, slot, nil, nil
     set[settingKey(macro)] = next(spells) and spells or nil
     rewrite(macro)
 end
@@ -2422,6 +2513,13 @@ function smb.setCustomBody(macro, text)
     return true
 end
 
+-- Sets the rank a macro's spell is cast at (a rank number, or nil for Highest), then rewrites the macro like
+-- smb.toggleOption.
+function smb.setSpellRank(macro, rank)
+    settings("spellRank")[settingKey(macro)] = rank
+    rewrite(macro)
+end
+
 -- Sets the rank a macro casts (nil for Normal, "raid" or "combat"), then rewrites the macro like smb.toggleOption.
 -- It is stored without checking the sequence (see smb.rank): the menu greys the downranks out while one is on.
 function smb.setRank(macro, rank)
@@ -2441,7 +2539,7 @@ local SPELL_SETTINGS = {
     "petAttack", "stopCast", "startAttack", "startAttackBefore", "petAttackAfter", "autoShotBefore",
     "autoShotAfter", "petFollowBefore", "petFollowAfter",
     "stopAttackBefore", "stopAttackAfter", "cancelIceBlockBefore", "clearDeadBefore", "targetEnemyBefore", "useItems", "useItemsAfter", "racials", "racialsAfter", "order", "orderAfter", "modifiers", "forms",
-    "sequence", "followUp", "iconSpell", "customIcon", "customBody",
+    "sequence", "followUp", "iconSpell", "customIcon", "customBody", "spellRank",
 }
 local EQUIPMENT_SETTINGS = {"equipStopAttack", "equipStopCast"}
 
