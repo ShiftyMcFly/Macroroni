@@ -310,6 +310,7 @@ local function classConfig()
         isOffGcdSpell = nameMatcher(source.offGcd),
         isBuffSpell = nameMatcher(source.buffs),
         isDispelSpell = nameMatcher(source.dispels),
+        hasStealthSpells = source.stealth ~= nil and #source.stealth > 0,
     }
     for rank, category in ipairs(config.categories) do
         config.categoryMatchers[rank] = nameMatcher(category.spells)
@@ -844,6 +845,45 @@ function smb.hasModifierOn(macro)
     return false
 end
 
+-- The condition picks: a spell (or equipment slot) cast while stealthed, in combat or out of combat. They are
+-- kept with the modifier keys' picks, under these keys, and read and set with the same functions
+-- (smb.modifierSpell, smb.modifierCastOn, smb.modifierRank, smb.setModifierSpell...).
+smb.CONDITIONS = {"stealth", "combat", "nocombat"}
+
+-- The macro conditional of each modifier key and condition pick.
+local PICK_CONDITION = {shift = "mod:shift", ctrl = "mod:ctrl", alt = "mod:alt",
+    stealth = "stealth", combat = "combat", nocombat = "nocombat"}
+
+-- Whether the player can stealth: a class with a stealth spell (Rogues' Stealth, Druids' Prowl), or a Night
+-- Elf (Shadowmeld).
+local function canStealth()
+    return classConfig().hasStealthSpells or select(2, UnitRace("player")) == "NightElf"
+end
+
+-- Whether a macro offers a condition pick ("stealth", "combat" or "nocombat"): every macro that offers the
+-- modifier keys, In Stealth only for a player who can stealth.
+function smb.offersCondition(macro, condition)
+    if not smb.offersModifiers(macro) then return false end
+    return condition ~= "stealth" or canStealth()
+end
+
+-- The condition picks a macro offers, in menu order.
+function smb.offeredConditions(macro)
+    local list = {}
+    for _, condition in ipairs(smb.CONDITIONS) do
+        if smb.offersCondition(macro, condition) then list[#list + 1] = condition end
+    end
+    return list
+end
+
+-- Whether a macro has a spell or an equipment slot set for any condition it offers.
+function smb.hasConditionOn(macro)
+    for _, condition in ipairs(smb.offeredConditions(macro)) do
+        if smb.modifierSpell(macro, condition) or smb.modifierSlot(macro, condition) then return true end
+    end
+    return false
+end
+
 -- The class config's forms' names, in config order: Druids' Caster, Cat, Bear, Travel and Aquatic.
 function smb.formNames()
     local names = {}
@@ -1004,6 +1044,7 @@ function smb.iconSpells(macro)
     if smb.isOptionOn(macro, "pet") then add(macro.petAbility) end
     for _, form in ipairs(smb.formNames()) do add(smb.formSpell(macro, form)) end
     for _, mod in ipairs(smb.MODIFIERS) do add(smb.modifierSpell(macro, mod)) end
+    for _, condition in ipairs(smb.offeredConditions(macro)) do add(smb.modifierSpell(macro, condition)) end
     for _, name in ipairs(sequenceSteps(macro) or NO_SLOTS) do add(name) end
     local pair = smb.pairMacro(macro)
     if pair then add(pair.name) end
@@ -1201,21 +1242,37 @@ end
 -- toggle spell, such as an aspect, is always cast as "!<spell>", so holding the key and pressing again never
 -- toggles it off. A spell that isn't learned is left out, keeping its setting. An equipment pick uses whatever
 -- is in its slot, e.g. "[mod:ctrl] 13; ", like the useItems lines.
-local function modifierClauses(macro)
+-- keys is the list of picks to cast: smb.MODIFIERS, or condition picks (see smb.CONDITIONS), e.g.
+-- "[stealth] Cheap Shot; [nocombat] Starfire; ".
+local function modifierClauses(macro, keys)
     local clauses = {}
-    for _, mod in ipairs(smb.MODIFIERS) do
+    for _, mod in ipairs(keys or smb.MODIFIERS) do
         local other = smb.macroByName[smb.modifierSpell(macro, mod) or ""]
         local slot = smb.modifierSlot(macro, mod)
+        local condition = PICK_CONDITION[mod]
+        -- a stealth spell (Stealth, Prowl) toggles off when cast again, so it is cast only while not stealthed,
+        -- e.g. "[nocombat,nostealth] Stealth; Kick": a press while stealthed falls through to the next clause
+        if not slot and other and other.stealth then condition = condition .. ",nostealth" end
         if slot then
-            clauses[#clauses + 1] = "[mod:" .. mod .. "] " .. slot .. "; "
+            clauses[#clauses + 1] = "[" .. condition .. "] " .. slot .. "; "
         elseif other and not other.unlearned then
             -- on the target unless the pick's Cast On is one the spell offers
             local castOn = smb.modifierCastOn(macro, mod)
             if not (castOn and smb.offersCastOn(other, castOn)) then castOn = "target" end
-            clauses[#clauses + 1] = targetedClause("mod:" .. mod, other, true, castOn, smb.modifierRank(macro, mod) or false)
+            clauses[#clauses + 1] = targetedClause(condition, other, true, castOn, smb.modifierRank(macro, mod) or false)
         end
     end
     return table.concat(clauses)
+end
+
+-- The clauses of a macro's condition picks among keys ("stealth", or "combat" and "nocombat"), the ones it
+-- offers, like modifierClauses.
+local function conditionClauses(macro, keys)
+    local offered = {}
+    for _, key in ipairs(keys) do
+        if smb.offersCondition(macro, key) then offered[#offered + 1] = key end
+    end
+    return modifierClauses(macro, offered)
 end
 
 -- An enemy player copy switches back to the previous target after the cast. The slash command, not
@@ -1473,9 +1530,11 @@ local function castBody(macro)
     -- a toggle spell's spam option renames the cast (see smb.castName) rather than adding a condition
     local name = smb.castName(macro)
     if spam == NO_TOGGLE then spam = nil end
-    -- the modifier spells' clauses go first, so a held key wins over the form spells, and those over the
-    -- macro's own
-    local mods = modifierClauses(macro) .. formClauses(macro)
+    -- the modifier spells' clauses go first, so a held key wins over the rest; then the In Stealth pick, so a
+    -- Druid's Prowl pick wins over its Cat Form one; then the form spells; then the In Combat and Out Of Combat
+    -- picks; then the macro's own
+    local mods = modifierClauses(macro) .. conditionClauses(macro, {"stealth"}) .. formClauses(macro)
+        .. conditionClauses(macro, {"combat", "nocombat"})
     local before = {}
     for _, entry in ipairs(sideEntries(macro, "before", spam)) do
         before[#before + 1] = entry[2] .. "\n"

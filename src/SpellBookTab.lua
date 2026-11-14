@@ -13,7 +13,13 @@ end
 
 local setMacro, refresh
 
-local MODIFIER_LABELS = {shift = "Shift", ctrl = "Ctrl", alt = "Alt"}
+local MODIFIER_LABELS = {shift = "Shift", ctrl = "Ctrl", alt = "Alt",
+    stealth = "In Stealth", combat = "In Combat", nocombat = "Out Of Combat"}
+
+-- The title of each modifier key's and condition pick's submenu.
+local PICK_TITLES = {shift = "Cast While Shift Is Held", ctrl = "Cast While Ctrl Is Held",
+    alt = "Cast While Alt Is Held", stealth = "Cast While Stealthed", combat = "Cast While In Combat",
+    nocombat = "Cast While Out Of Combat"}
 
 -- A spam option's menu label and button subtext, by the kind of condition it adds (see spamCondition in
 -- Macros.lua).
@@ -492,8 +498,14 @@ function smb.showMacroMenu(owner, macro, onChange, actionSlot, plainSpell)
                 section[#section + 1] = other.name
             end
         end
+        -- the modifier keys, then, after a divider, the condition picks (In Stealth, In Combat, Out Of
+        -- Combat), which work the same way
+        local picks = {}
+        for _, mod in ipairs(smb.MODIFIERS) do picks[#picks + 1] = mod end
+        for _, condition in ipairs(smb.offeredConditions(macro)) do picks[#picks + 1] = condition end
         rootDescription:CreateDivider()
-        for _, mod in ipairs(smb.MODIFIERS) do
+        for _, mod in ipairs(picks) do
+            if mod == smb.offeredConditions(macro)[1] then rootDescription:CreateDivider() end
             local label = MODIFIER_LABELS[mod]
             -- picks a spell (nil for None), cast where castOn says (see smb.modifierCastOn), at rank (nil for
             -- Highest, see smb.modifierRank)
@@ -523,7 +535,7 @@ function smb.showMacroMenu(owner, macro, onChange, actionSlot, plainSpell)
                 or current and smb.rankedName(current, currentRank)
                     .. (currentCastOn and " (" .. CAST_ON_LABELS[currentCastOn] .. ")" or "")
                 or "None"))
-            submenu:CreateTitle("Cast While " .. label .. " Is Held")
+            submenu:CreateTitle(PICK_TITLES[mod])
             submenu:CreateRadio("None", function()
                 return smb.modifierSpell(macro, mod) == nil and smb.modifierSlot(macro, mod) == nil
             end, function() pick(nil) end)
@@ -952,6 +964,9 @@ function setMacro(button, macro, bars)
         button.subText:SetTextColor(unpack(MOUSEOVER_COLOR))
     elseif smb.hasModifierOn(macro) then
         button.subText:SetText("Has Modifiers")
+        button.subText:SetTextColor(unpack(MOUSEOVER_COLOR))
+    elseif smb.hasConditionOn(macro) then
+        button.subText:SetText("Conditions")
         button.subText:SetTextColor(unpack(MOUSEOVER_COLOR))
     elseif smb.useItemSlots(macro, "before")[1] or smb.useItemSlots(macro, "after")[1] then
         button.subText:SetText("Use items")

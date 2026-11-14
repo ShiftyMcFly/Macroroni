@@ -1,5 +1,12 @@
 # Macroroni
 
+## v1.6.0 (2026-11-14)
+
+- Added In Stealth, In Combat and Out Of Combat to each spell macro's right-click menu, below Shift, Ctrl and Alt. Each picks a spell (or an equipped on-use item) to cast instead while that condition holds, with its own Cast On and Rank, like the Shift, Ctrl and Alt picks.
+- In Stealth shows for Rogues, Druids and Night Elves. It comes before the form picks, so a Druid's stealth pick wins over the Cat Form one; In Combat and Out Of Combat come after them. Shift, Ctrl and Alt still come first.
+- Stealth or Prowl picked for any of these, or for Shift, Ctrl or Alt, is cast only while not stealthed, so a second press never takes you out of stealth: e.g. Kick with Out Of Combat: Stealth casts "[nocombat,nostealth] Stealth; Kick".
+- A macro with a condition pick shows "Conditions" on the page.
+
 ## v1.5.0 (2026-11-12)
 
 - Added help/harm pairing. An enemy spell's menu has On Friendly, and a friendly spell's has On Enemy: pick a spell to cast instead when the unit is of the other reaction, e.g. a Mouseover Moonfire that casts Regrowth on a friendly mouseover.
