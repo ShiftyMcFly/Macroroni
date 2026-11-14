@@ -1,0 +1,28 @@
+# Packages the addon when a version tag (e.g. v1.7.0) is pushed, and uploads it to CurseForge and a GitHub
+# release. The game version (1.60.1) comes from the TOC's Interface line, the project from X-Curse-Project-ID.
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # create the GitHub release
+    env:
+      CF_API_TOKEN: ${{ secrets.CF_API_KEY }}
+      GITHUB_API_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - name: Check out the tag
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Package and upload
+        uses: BigWigsMods/packager@v2
+        with:
+          # keep the zip named like the earlier releases, e.g. Macroroni-v1.7.0.zip, without "-forever"
+          args: -n "{package-name}-{project-version}:{project-version}"
