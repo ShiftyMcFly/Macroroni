@@ -119,6 +119,8 @@ smb.classConfigs.MAGE = {
         "Evocation",
     },
 
+    revives = {},
+
     stealth = {},
 
     extraSpells = {

@@ -145,6 +145,10 @@ smb.classConfigs.PRIEST = {
         "Penance",
     },
 
+    revives = {
+        "Resurrection",
+    },
+
     stealth = {},
 
     toggle = {

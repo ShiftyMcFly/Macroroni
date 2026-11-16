@@ -1,5 +1,11 @@
 # Macroroni
 
+## v1.6.1 (2026-11-15)
+
+- Fixed spells that revive a dead player (Druids' Rebirth and Revive, Paladins' Redemption, Priests' Resurrection, Shamans' Ancestral Spirit) checking that the unit is alive. Their Mouseover, Focus and Target casts, picks and help/harm pairs no longer have the nodead condition, so they land on a dead player, e.g. "[@mouseover,help][] Rebirth".
+- These spells no longer fall back to casting on you, which sent them to you when your target was dead.
+- The class config files have a new revives list naming these spells.
+
 ## v1.6.0 (2026-11-14)
 
 - Added In Stealth, In Combat and Out Of Combat to each spell macro's right-click menu, below Shift, Ctrl and Alt. Each picks a spell (or an equipped on-use item) to cast instead while that condition holds, with its own Cast On and Rank, like the Shift, Ctrl and Alt picks.

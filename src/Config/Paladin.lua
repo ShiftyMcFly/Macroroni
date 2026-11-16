@@ -101,6 +101,10 @@ smb.classConfigs.PALADIN = {
 
     channeled = {},
 
+    revives = {
+        "Redemption",
+    },
+
     stealth = {},
 
     extraSpells = {

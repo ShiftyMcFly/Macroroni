@@ -125,6 +125,10 @@ smb.classConfigs.SHAMAN = {
 
     channeled = {},
 
+    revives = {
+        "Ancestral Spirit",
+    },
+
     stealth = {},
 
     extraSpells = {

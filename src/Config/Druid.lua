@@ -133,6 +133,11 @@ smb.classConfigs.DRUID = {
         "Hurricane",
     },
 
+    revives = {
+        "Rebirth",
+        "Revive",
+    },
+
     stealth = {
         "Prowl",
     },

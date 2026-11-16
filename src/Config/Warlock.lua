@@ -119,6 +119,8 @@ smb.classConfigs.WARLOCK = {
         "Rain of Fire",
     },
 
+    revives = {},
+
     stealth = {},
 
     petAbilities = {

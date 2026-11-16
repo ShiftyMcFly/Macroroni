@@ -305,6 +305,7 @@ local function classConfig()
         isCombatRank1Spell = nameMatcher(source.combatRank1),
         isChanneledSpell = nameMatcher(source.channeled),
         isStealthSpell = nameMatcher(source.stealth),
+        isReviveSpell = nameMatcher(source.revives),
         isToggleSpell = nameMatcher(source.toggle),
         isCooldownSpell = nameMatcher(source.cooldowns),
         isOffGcdSpell = nameMatcher(source.offGcd),
@@ -1172,7 +1173,13 @@ end
 -- enemy player copy casts on its own target, so it never does.
 local function selfFallback(macro)
     return smb.fallsBackToSelf() and macro.target == "help" and not macro.custom and not macro.equipment
-        and not macro.enemyPlayer
+        and not macro.enemyPlayer and not macro.revive
+end
+
+-- The alive check a macro's unit conditions get: ",nodead", or "" for a spell that revives a dead player
+-- (the class config's revives), which must land on one.
+local function alive(macro)
+    return macro.revive and "" or ",nodead"
 end
 
 -- A /cast of name that tries each target conditional in turn ("" for none), with a rank 1 cast of rank1 under
@@ -1215,13 +1222,13 @@ local function targetedClause(condition, other, noToggle, castOn, rank)
     end
     -- the target clause: the plain target, or a live friendly target then you (see selfFallback)
     local onTarget = "[" .. (condition or "") .. "]"
-    if selfFallback(other) then onTarget = cond(nil, condition, "help,nodead") .. cond(nil, condition, "@player") end
+    if selfFallback(other) then onTarget = cond(nil, condition, "help" .. alive(other)) .. cond(nil, condition, "@player") end
     if castOn == "cursor" then
         conditional = cond(nil, condition, "@cursor")
     elseif castOn == "self" then
         conditional = cond(nil, condition, "@player")
     elseif castOn == "mouseover" or castOn == "focus" then
-        conditional = cond(nil, condition, "@" .. castOn .. "," .. other.target .. ",nodead") .. onTarget
+        conditional = cond(nil, condition, "@" .. castOn .. "," .. other.target .. alive(other)) .. onTarget
     elseif castOn == nil and selfFallback(other) then
         conditional = onTarget
     end
@@ -1566,18 +1573,18 @@ local function castBody(macro)
     if rank ~= nil and not steps then
         local targets = {""}
         if castOn == "nearest" then
-            targets = {"help,nodead", "@player"}
+            targets = {"help" .. alive(macro), "@player"}
         elseif macro.enemyPlayer then
-            targets = {"harm,nodead"}
+            targets = {"harm" .. alive(macro)}
         elseif castOn == "cursor" then
             targets = {"@cursor"}
         elseif castOn == "self" then
             targets = {"@player"}
         elseif castOn == "mouseover" or castOn == "focus" then
-            targets = {"@" .. castOn .. "," .. macro.target .. ",nodead", ""}
+            targets = {"@" .. castOn .. "," .. macro.target .. alive(macro), ""}
         end
         if fallback then
-            targets[#targets] = "help,nodead"
+            targets[#targets] = "help" .. alive(macro)
             targets[#targets + 1] = "@player"
         end
         return header .. (castOn == "nearest" and NEAREST_LINE or "") .. (macro.enemyPlayer and ENEMY_LINE or "")
@@ -1586,11 +1593,11 @@ local function castBody(macro)
     -- a macro cast on the nearest player casts on the player it just targeted, or on you when no friendly
     -- player is near
     if castOn == "nearest" then
-        return header .. NEAREST_LINE .. cast(cond(spam, "help,nodead") .. cond(spam, "@player"))
+        return header .. NEAREST_LINE .. cast(cond(spam, "help" .. alive(macro)) .. cond(spam, "@player"))
     end
     -- an enemy player copy casts on the enemy player it just targeted, then switches back
     if macro.enemyPlayer then
-        return header .. ENEMY_LINE .. cast(cond(spam, "harm,nodead")) .. LAST_TARGET_FOOTER
+        return header .. ENEMY_LINE .. cast(cond(spam, "harm" .. alive(macro))) .. LAST_TARGET_FOOTER
     end
     if smb.isOptionOn(macro, "pet") then
         -- [pet:X] matches the pet's creature family, so another demon being out still summons this one
@@ -1604,7 +1611,7 @@ local function castBody(macro)
     if castOn == "self" then
         return header .. cast(cond(spam, "@player"))
     end
-    local onTarget = fallback and cond(spam, "help,nodead") .. cond(spam, "@player") or "[" .. (spam or "") .. "]"
+    local onTarget = fallback and cond(spam, "help" .. alive(macro)) .. cond(spam, "@player") or "[" .. (spam or "") .. "]"
     -- a pair spell is cast where the unit is of its reaction, before the macro's own spell is cast there:
     -- at the mouseover (or focus) first, then the target, e.g. "[@mouseover,help,nodead] Regrowth;
     -- [@mouseover,harm,nodead] Moonfire; [help,nodead] Regrowth; Moonfire"
@@ -1614,15 +1621,15 @@ local function castBody(macro)
         local pairName = smb.rankedName(smb.castName(pair, true), smb.pairRank(macro))
         local clauses = {}
         if castOn == "mouseover" or castOn == "focus" then
-            clauses[1] = "[@" .. castOn .. "," .. pair.target .. ",nodead] " .. pairName
-            clauses[2] = cond(spam, "@" .. castOn .. "," .. macro.target .. ",nodead") .. " " .. name
+            clauses[1] = "[@" .. castOn .. "," .. pair.target .. alive(pair) .. "] " .. pairName
+            clauses[2] = cond(spam, "@" .. castOn .. "," .. macro.target .. alive(macro)) .. " " .. name
         end
-        clauses[#clauses + 1] = "[" .. pair.target .. ",nodead] " .. pairName
+        clauses[#clauses + 1] = "[" .. pair.target .. alive(pair) .. "] " .. pairName
         clauses[#clauses + 1] = (onTarget ~= "[]" and onTarget .. " " or "") .. name
         return header .. "/cast " .. mods .. table.concat(clauses, "; ")
     end
     if castOn == "mouseover" or castOn == "focus" then
-        return header .. cast(cond(spam, "@" .. castOn .. "," .. macro.target .. ",nodead") .. onTarget)
+        return header .. cast(cond(spam, "@" .. castOn .. "," .. macro.target .. alive(macro)) .. onTarget)
     end
     if fallback then return header .. cast(onTarget) end
     return header .. cast(cond(spam))
@@ -1704,6 +1711,7 @@ local function makeMacro(name, icon, unlearned, id)
         dispel = classConfig().isDispelSpell(name) ~= nil,
         spam = spamCondition(name),
         stealth = classConfig().isStealthSpell(name) ~= nil,
+        revive = classConfig().isReviveSpell(name) ~= nil,
         stances = stancesOf(name, id),
         spellID = id,
         -- the question mark icon lets #showtooltip show the spell's own icon on the action bar

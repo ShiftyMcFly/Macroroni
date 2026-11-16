@@ -107,6 +107,8 @@ smb.classConfigs.HUNTER = {
         "Mend Pet",
     },
 
+    revives = {},
+
     stealth = {},
 
     toggle = {

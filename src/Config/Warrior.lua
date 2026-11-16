@@ -89,6 +89,8 @@ smb.classConfigs.WARRIOR = {
 
     channeled = {},
 
+    revives = {},
+
     stealth = {},
 
     -- the stances each spell can be cast in

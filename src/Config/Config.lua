@@ -64,6 +64,10 @@ local _, smb = ...
 --   gets a [nochanneling:<spell>] condition, so pressing the macro again while the spell is channelling does
 --   nothing and you can spam the button.
 --
+-- revives: spells that bring a dead player back, such as Rebirth and Resurrection. Their casts leave out the
+--   [nodead] condition the other friendly spells get, so a Mouseover or Target cast lands on a dead player, and
+--   they never fall back to casting on you.
+--
 -- stealth: stealth spells that offer "Stay In Stealth On Recast" (right-click a macro): the cast gets a [nostealth]
 --   condition, so pressing the macro again while stealthed doesn't take you out of stealth.
 --

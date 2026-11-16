@@ -89,6 +89,8 @@ smb.classConfigs.ROGUE = {
 
     channeled = {},
 
+    revives = {},
+
     stealth = {
         "Stealth",
     },
