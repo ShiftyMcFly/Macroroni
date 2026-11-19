@@ -275,6 +275,48 @@ function smb.showMacroMenu(owner, macro, onChange, actionSlot, plainSpell)
             -- a pick no longer learned stays listed, so it can be changed back
             if picked and not listed then addPick(picked .. " (unavailable)", picked) end
         end
+        -- the Equip Set submenu: the Equipment Manager set the macro equips when pressed (None by default),
+        -- then, for a class with forms, the set it equips in each form instead. A picked set no longer saved
+        -- stays listed, so it can be changed
+        local function addEquipSetMenu()
+            if not smb.offersEquipSet(macro) then return end
+            local saved = smb.equipmentSets()
+            local own = smb.equipSet(macro)
+            local byForm = false
+            for _, form in ipairs(smb.formNames()) do byForm = byForm or smb.formSet(macro, form) ~= nil end
+            local label = own or (byForm and "By " .. smb.formNoun()) or "None"
+            if own and byForm then label = label .. " + By " .. smb.formNoun() end
+            local submenu = rootDescription:CreateButton("Equip Set: " .. label)
+            -- radios picking a set into a menu: None, each saved set, then a stale pick
+            local function addSets(menu, current, pick)
+                menu:CreateRadio("None", function() return current() == nil end, function() pick(nil) end)
+                for _, name in ipairs(saved) do
+                    menu:CreateRadio(name, function() return current() == name end, function() pick(name) end)
+                end
+                local stored = current()
+                if stored and not tContains(saved, stored) then
+                    menu:CreateRadio(stored .. " (not saved)", function() return current() == stored end,
+                        function() pick(stored) end)
+                end
+            end
+            submenu:CreateTitle("Equip When Pressed")
+            if #saved == 0 then submenu:CreateButton("No Equipment Sets Saved"):SetEnabled(false) end
+            addSets(submenu, function() return smb.equipSet(macro) end, function(name)
+                if not change(function(m) smb.setEquipSet(m, name) end) then return end
+                onChange() -- rewrites the macro and its subtext
+            end)
+            if not smb.offersForms(macro) then return end
+            submenu:CreateDivider()
+            submenu:CreateTitle("Equip In " .. smb.formNoun() .. " Instead")
+            for _, form in ipairs(smb.formNames()) do
+                local current = smb.formSet(macro, form)
+                local formMenu = submenu:CreateButton(form .. ": " .. (current or "None"))
+                addSets(formMenu, function() return smb.formSet(macro, form) end, function(name)
+                    if not change(function(m) smb.setFormSet(m, form, name) end) then return end
+                    onChange() -- rewrites the macro and its subtext
+                end)
+            end
+        end
         -- the Icon submenu: Automatic (a bare #showtooltip), the spell it names, from the spells the macro casts,
         -- or a custom icon from the game's list. An edited macro's text has its own #showtooltip line, so it
         -- offers only Automatic (the question mark icon) and a custom icon
@@ -483,6 +525,7 @@ function smb.showMacroMenu(owner, macro, onChange, actionSlot, plainSpell)
         addSequenceMenu()
         addFollowUpMenu()
         addPairMenu()
+        addEquipSetMenu()
         addIconMenu()
         if not smb.offersModifiers(macro) then return end
         -- one submenu per modifier key, picking the spell cast while it is held from the page's other learned
@@ -967,6 +1010,9 @@ function setMacro(button, macro, bars)
         button.subText:SetTextColor(unpack(MOUSEOVER_COLOR))
     elseif smb.hasConditionOn(macro) then
         button.subText:SetText("Conditions")
+        button.subText:SetTextColor(unpack(MOUSEOVER_COLOR))
+    elseif smb.hasEquipSetOn(macro) then
+        button.subText:SetText("Equip Set")
         button.subText:SetTextColor(unpack(MOUSEOVER_COLOR))
     elseif smb.useItemSlots(macro, "before")[1] or smb.useItemSlots(macro, "after")[1] then
         button.subText:SetText("Use items")

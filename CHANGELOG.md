@@ -1,5 +1,12 @@
 # Macroroni
 
+## v1.7.0 (2026-11-19)
+
+- Added an Equip Set menu to each spell macro's right-click menu, listing the sets saved in the Equipment Manager. None, the default, leaves your gear alone; picking a set adds an /equipset line right before the cast, e.g. a Bear Form macro that also puts on your tank set.
+- Druids and Warriors can also pick a set for each form or stance, which the macro equips when pressed in that form, e.g. "/equipset [form:1] Bear Tank; [form:3] Cat DPS". The macro's own set, when picked too, is used in any other form.
+- The set goes by the form you are in when you press the button. So a Cat Form macro with Feral as its own set and Resto picked for Cat puts on Feral as you shift into Cat, and Resto as you shift out. Armor can't be swapped in combat; there /equipset changes only weapons.
+- A set picked and later deleted or renamed in the Equipment Manager stays listed as "(not saved)". A macro that equips a set shows "Equip Set" on the page.
+
 ## v1.6.1 (2026-11-15)
 
 - Fixed spells that revive a dead player (Druids' Rebirth and Revive, Paladins' Redemption, Priests' Resurrection, Shamans' Ancestral Spirit) checking that the unit is alive. Their Mouseover, Focus and Target casts, picks and help/harm pairs no longer have the nodead condition, so they land on a dead player, e.g. "[@mouseover,help][] Rebirth".

@@ -73,7 +73,9 @@ local EQUIPMENT_OPTIONS = { equipStopAttack = true, equipStopCast = true }
 -- when unset (see smb.pickedRank); a modifier key's spell keeps its own in "modifiers" as shiftRank (ctrlRank,
 -- altRank). "pairSpell" holds one spell name, of the other reaction: the macro casts it when the unit is
 -- friendly (for an enemy spell) or an enemy (for a friendly spell) (see smb.pairMacro), at the rank number in
--- "pairRank", or Highest when unset. "forms"
+-- "pairRank", or Highest when unset. "equipSet" holds the name of an Equipment Manager set the macro equips
+-- (see smb.equipSet), and "formSets" a table per spell name, {[form name] = set name}, the set it equips while in
+-- that form instead (see smb.formSet). "forms"
 -- holds a table per spell name, {[form name] = spell name}: the macro casts that spell while in that form of
 -- the class config's forms (see smb.formSpell). An enemy player copy stores its
 -- own settings under its spell's name plus the copy's suffix, e.g. "Dispel Magic @E" (see settingKey), and a
@@ -1108,6 +1110,50 @@ function smb.hasPairOn(macro)
     return smb.pairMacro(macro) ~= nil
 end
 
+-- The names of the sets saved in the Equipment Manager, in its order, or an empty list on a client without one.
+function smb.equipmentSets()
+    local names = {}
+    if C_EquipmentSet and C_EquipmentSet.GetEquipmentSetIDs then
+        for _, id in ipairs(C_EquipmentSet.GetEquipmentSetIDs() or {}) do
+            local name = C_EquipmentSet.GetEquipmentSetInfo(id)
+            if name then names[#names + 1] = name end
+        end
+    elseif GetNumEquipmentSets then
+        for i = 1, GetNumEquipmentSets() do
+            local name = GetEquipmentSetInfo(i)
+            if name then names[#names + 1] = name end
+        end
+    end
+    return names
+end
+
+-- Whether a macro can equip a set: every spell macro.
+function smb.offersEquipSet(macro)
+    return smb.offersUseItems(macro)
+end
+
+-- The set a macro equips when pressed, or nil. A set no longer saved stays picked: /equipset then does nothing.
+function smb.equipSet(macro)
+    if not smb.offersEquipSet(macro) then return nil end
+    return settings("equipSet")[settingKey(macro)]
+end
+
+-- The set a macro equips while in a form (a form's name from the class config), or nil.
+function smb.formSet(macro, form)
+    if not (smb.offersEquipSet(macro) and smb.offersForms(macro)) then return nil end
+    local sets = settings("formSets")[settingKey(macro)]
+    return sets and sets[form]
+end
+
+-- Whether a macro equips a set, its own or one for a form.
+function smb.hasEquipSetOn(macro)
+    if smb.equipSet(macro) then return true end
+    for _, form in ipairs(smb.formNames()) do
+        if smb.formSet(macro, form) then return true end
+    end
+    return false
+end
+
 -- The spell picked for a macro's icon, or nil for Automatic. It may no longer be in the macro: its setting is
 -- kept, but smb.iconSpell ignores it.
 function smb.pickedIconSpell(macro)
@@ -1346,6 +1392,26 @@ local function formCondition(form)
     end
 end
 
+-- A macro's "/equipset" line, ending with a newline, or "" when it equips no set: the sets picked for forms
+-- under their form's condition, then its own set for any other form, e.g. "/equipset [form:1] Bear Tank;
+-- [form:3] Cat DPS; Caster". A form not learned yet is left out, keeping its setting. It goes before the
+-- casts: leaving a form takes effect at once, so a line after a /cast that toggles the form off would see the
+-- new form, not the one the button was pressed in.
+local function equipSetLine(macro)
+    local clauses = {}
+    if smb.offersForms(macro) then
+        for _, form in ipairs(classConfig().forms) do
+            local set = smb.formSet(macro, form.name)
+            local condition = set and formCondition(form)
+            if condition then clauses[#clauses + 1] = "[" .. condition .. "] " .. set end
+        end
+    end
+    local own = smb.equipSet(macro)
+    if own then clauses[#clauses + 1] = own end
+    if #clauses == 0 then return "" end
+    return "/equipset " .. table.concat(clauses, "; ") .. "\n"
+end
+
 -- The form picks a macro casts, as {condition, page macro}, in config order. A pick that isn't learned, whose
 -- form isn't, or that the form doesn't allow (see smb.formAllows), is left out, keeping its setting.
 local function formPicks(macro)
@@ -1547,7 +1613,9 @@ local function castBody(macro)
         before[#before + 1] = entry[2] .. "\n"
     end
     local iconSpell = smb.iconSpell(macro)
+    -- the /equipset line goes right before the cast, after the before-cast lines (see equipSetLine)
     local header = "#showtooltip" .. (iconSpell and " " .. iconSpell or "") .. "\n" .. table.concat(before)
+        .. equipSetLine(macro)
     -- with a sequence, every step is cast like the macro's own spell
     local steps = sequenceSteps(macro)
     if steps then
@@ -2659,6 +2727,23 @@ function smb.setPairSpell(macro, name, rank)
     rewrite(macro)
 end
 
+-- Sets the Equipment Manager set a macro equips when pressed, or clears it with nil, then rewrites the macro
+-- like smb.toggleOption.
+function smb.setEquipSet(macro, name)
+    settings("equipSet")[settingKey(macro)] = name
+    rewrite(macro)
+end
+
+-- Sets the set a macro equips while in a form, or clears it with nil, then rewrites the macro like
+-- smb.toggleOption.
+function smb.setFormSet(macro, form, name)
+    local set = settings("formSets")
+    local sets = set[settingKey(macro)] or {}
+    sets[form] = name
+    set[settingKey(macro)] = next(sets) and sets or nil
+    rewrite(macro)
+end
+
 -- Sets the rank a macro's spell is cast at (a rank number, or nil for Highest), then rewrites the macro like
 -- smb.toggleOption.
 function smb.setSpellRank(macro, rank)
@@ -2686,6 +2771,7 @@ local SPELL_SETTINGS = {
     "autoShotAfter", "petFollowBefore", "petFollowAfter",
     "stopAttackBefore", "stopAttackAfter", "cancelIceBlockBefore", "clearDeadBefore", "targetEnemyBefore", "useItems", "useItemsAfter", "racials", "racialsAfter", "order", "orderAfter", "modifiers", "forms",
     "sequence", "followUp", "iconSpell", "customIcon", "customBody", "spellRank", "pairSpell", "pairRank",
+    "equipSet", "formSets",
 }
 local EQUIPMENT_SETTINGS = {"equipStopAttack", "equipStopCast"}
 
